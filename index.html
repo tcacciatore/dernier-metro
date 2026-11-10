@@ -239,7 +239,7 @@ function reset(mode) {
   buildLine();
   S = { mode, pos: 0, v: 0, clock: T0, cur: 0, next: 1, phase: 'dwell', doors: 1,
         alerted: false, buzzT: 0, msgs: [], score: 0, mp: [], t: 0, warnT: 0, hintT: 0, endT: -1,
-        combo: 0, base: 0, pax: 0, paxOffer: 0, load: 0, cars: [0, 0, 0, 0, 0], blockers: [0, 1, 2, 3, 4].map(() => mkPerson(0, 0)), out: 0, trafSum: 0, trafT: 0, trafBonus: 0, trafShow: 0, trafDown: 0, trafLvl: -1, trafMsgT: 0, fullWarn: false, pops: [], recap: null, fx: null, inc: null, limit: 0, overT: 0, sigPos: null, sigRed: 0, alarm: null, alarmAt: 0, newRecord: false, vacT: 35, vacAlert: 0, vacBeep: 0, radioT: 30, runners: 0, waves: 0, waveT: 0, over: null, missed: 0, trafWarn: false, trace: [], brakeF: 0, schedShow: 0, entryDelta: null, tickT: 0, tickHi: false, gap: 999, vperm: 99, gapT: 0, gapArmed: true, ebrake: false, person: null, malaise: null, medicT: 0, medicCar: 0, blackout: 0, blackT: 0, beepT: 0, secLost: 0, legPen: 0, rConfirm: 0, help: false, tuto: -1, tutoT: 0,
+        combo: 0, base: 0, pax: 0, paxOffer: 0, load: 0, cars: [0, 0, 0, 0, 0], blockers: [0, 1, 2, 3, 4].map(() => mkPerson(0, 0)), out: 0, trafSum: 0, trafT: 0, trafBonus: 0, trafShow: 0, trafDown: 0, trafLvl: -1, trafMsgT: 0, fullWarn: false, pops: [], recap: null, fx: null, inc: null, limit: 0, overT: 0, sigPos: null, sigRed: 0, alarm: null, alarmAt: 0, newRecord: false, vacT: 35, vacAlert: 0, vacBeep: 0, radioT: 30, runners: 0, waves: 0, waveT: 0, over: null, missed: 0, trafWarn: false, trace: [], brakeF: 0, schedShow: 0, entryDelta: null, tickT: 0, tickHi: false, gap: 999, vperm: 99, gapT: 0, gapArmed: true, ebrake: false, person: null, dog: null, malaise: null, cab: null, dirtyCar: -1, dirtyKeep: false, medicT: 0, medicCar: 0, medicKind: 'medic', blackout: 0, blackT: 0, beepT: 0, secLost: 0, legPen: 0, rConfirm: 0, help: false, tuto: -1, tutoT: 0,
         missions: pickMissions(), missionShow: 0, pstreak: 0, precCount: 0, suspects: [], caught: 0, suspectAt: -1, holderAt: -1, holderPending: false, radio: 0, holdT: 0, annonce: 0, annCd: 0, theft: null };
   STATIONS[0].served = true;
   setupMirror(STATIONS[0]);
@@ -459,6 +459,17 @@ function radioCall() {
     S.malaise.called = true; S.score += 30;
     msg(`Radio : PCC prévenu, les secours attendent à ${STATIONS[S.next].name} (+30)`, '#7dff8a', 3.5); return;
   }
+  const cb = S.cab;
+  if (cb && cb.shown && !cb.called && cb.type !== 'slip' && S.phase === 'drive' && S.next < STATIONS.length) {
+    cb.called = true; const nn = STATIONS[S.next].name, v = `V${cb.car + 1}`;
+    const [pts, txt0] = {
+      sick: [20, `Radio : agent de nettoyage à ${nn}, la ${v} y sera fermée à la montée`],
+      fight: [20, `Radio : la sécurité attend la ${v} à ${nn}`],
+      bag: [20, `Radio : inspection du bagage prévue à ${nn}`],
+      vendor: [15, `📢 « La vente à la sauvette est interdite. » Il descendra à ${nn}`],
+    }[cb.type];
+    S.score += pts; msg(`${txt0} (+${pts})`, '#7dff8a', 4); return;
+  }
   if (S.theft && S.theft.shown && S.phase === 'drive') {      // alarme tirée pour le vol en cours
     S.suspects.forEach(x => x.pending = true); S.theft = null; S.score += 40;
     for (let i = 0; i < 4; i++) beep(i % 2 ? 660 : 990, 0.15, 'sawtooth', 0.05, i * 0.16);
@@ -513,9 +524,9 @@ function updateMirror(dt) {
     if (m.delay > 0) { if (open || m.st !== 'out') m.delay -= dt; continue; }
     if (m.st === 'walk') {
       if (!open || S.alerted) { m.halt = S.alerted; continue; }   // après le signal sonore : on ne monte plus
-      if (S.cars[carOf(m.door)] >= CAR_CAP) {
-        // voiture bondée : on cherche une porte d'une voiture moins chargée
-        const alt = DOORS.filter(dz => S.cars[carOf(dz)] < CAR_CAP).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
+      if (S.cars[carOf(m.door)] >= CAR_CAP || carOf(m.door) === S.dirtyCar) {
+        // voiture bondée (ou souillée) : on cherche une porte d'une autre voiture
+        const alt = DOORS.filter(dz => S.cars[carOf(dz)] < CAR_CAP && carOf(dz) !== S.dirtyCar).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
         if (alt !== undefined && Math.abs(alt - m.z) < 25) m.door = alt;
         else {
           m.halt = true;
@@ -534,6 +545,7 @@ function updateMirror(dt) {
       }
     } else if (m.st === 'door') {
       m.t -= dt;
+      if (m.t <= 0 && m.fight) { m.st = 'gone'; continue; }
       if (m.t <= 0) {
         m.st = 'in'; S.pax++; S.load++; S.cars[carOf(m.door)]++; S.score += 5; STATIONS[S.cur].res.board++;
         if (m.suspect) S.suspects.push({ car: carOf(m.door), pending: false });
@@ -544,6 +556,7 @@ function updateMirror(dt) {
     } else if (m.st === 'out') {
       if (!open) continue;
       m.t -= dt; m.x = Math.min(0.5, m.x + dt);
+      if (m.t <= 0 && m.extra) { m.st = 'leave'; m.tz = -4; m.tx = 3.2; m.sp = 1.1; continue; }
       if (m.t <= 0) { m.st = 'leave'; S.load = Math.max(0, S.load - 1); S.cars[carOf(m.door)] = Math.max(0, S.cars[carOf(m.door)] - 1); S.out++; pop(m.door, '-1', '#7fd4ff');
         m.tz = Math.random() < 0.5 ? -4 : 82; m.tx = 2.8 + Math.random() * 1.6; m.sp = 1.2 + Math.random() * 0.4; }
     } else if (m.st === 'leave') {
@@ -553,7 +566,8 @@ function updateMirror(dt) {
   }
   S.mp = S.mp.filter(m => m.st !== 'in' && m.st !== 'gone');
 }
-const blocked = () => S.mp.some(m => (m.delay <= 0 && m.st === 'door') || m.st === 'out');
+const busyDoor = () => DOORS.find(dz => doorState(dz) === 2);   // porte où un voyageur est dans l'encadrement
+const blocked = () => busyDoor() !== undefined;
 
 // ---------- Entrées ----------
 addEventListener('keydown', e => {
@@ -595,6 +609,12 @@ addEventListener('keydown', e => {
     sfxHorn(); S.hornT = 0.7;
     const pe = S.person;
     if (pe && pe.state === 'track' && S.phase === 'drive' && pe.pos - S.pos < 90) { pe.state = 'leaving'; msg('Coup de klaxon : la personne quitte la voie', '#9fe0ff', 2.5); }
+    const dg = S.dog;
+    if (dg && dg.seen && ['sit', 'trot', 'run'].includes(dg.state) && S.phase === 'drive' && dg.pos - S.pos < 90) {
+      dg.horns++;
+      if (Math.random() < 0.3 + 0.2 * dg.horns) { dg.state = 'leaving'; msg('Le chien file dans une niche du tunnel', '#9fe0ff', 2.5); }
+      else { dg.state = 'run'; dg.runT = 1.4 + Math.random(); msg('Le chien a peur… et court droit devant !', '#ffd75e', 2.5); }
+    }
     return;
   }
   if (k === 'v') { S.radio = 0; S.annonce = S.annonce ? 0 : 5; if (S.annonce) beep(900, 0.05, 'sine', 0.04); return; }
@@ -608,7 +628,7 @@ addEventListener('keydown', e => {
       const nStop = S.mp.filter(m => m.st === 'walk').length;
     }
   } else if (k === 'enter') {
-    if (S.medicT > 0 && (S.phase === 'dwell' || S.phase === 'alert')) { msg(`Secours en intervention : encore ${Math.ceil(S.medicT)} s`, '#ff8a7a', 2); return; }
+    if (S.medicT > 0 && (S.phase === 'dwell' || S.phase === 'alert')) { msg(`${S.medicKind === 'bag' ? 'Inspection du bagage' : 'Secours en intervention'} : encore ${Math.ceil(S.medicT)} s`, '#ff8a7a', 2); return; }
     if ((S.phase === 'dwell' || S.phase === 'alert') && S.endT < 0) {
       if (!S.alerted) pen(-15, 'Fermeture sans signal sonore !');
       S.phase = 'closing'; sfxDoorsClosing();
@@ -655,16 +675,48 @@ function arrive(st, err) {
     if (S.missed >= MISS_MAX) gameOver(`${MISS_MAX} arrêts ratés`, 'Arrêtez-vous à moins de 3 m de la marque STOP.');
     else msg(`Arrêt raté : ${S.missed} / ${MISS_MAX} — au ${MISS_MAX}e, fin de partie`, '#ff6b5b', 4);
   }
-  S.limit = 0; S.alarm = null; S.inc = null; S.theft = null; S.person = null;
+  S.limit = 0; S.alarm = null; S.inc = null; S.theft = null; S.person = null; S.dog = null;
   if (S.blackout) { S.blackout = 0; msg('Éclairage rétabli', '#7dff8a', 2); }
   if (S.malaise && S.malaise.shown) {
     const extra = S.malaise.called ? 8 : 15;
-    S.medicT = extra; S.medicCar = S.malaise.car;   // l'intervention fait prendre du retard
+    S.medicT = extra; S.medicCar = S.malaise.car; S.medicKind = 'medic';   // l'intervention fait prendre du retard
     setTimeout(() => msg(`🚑 Secours à bord de la V${S.medicCar + 1} : intervention ${extra} s${S.malaise ? '' : ''}`, '#ff8a7a', 4), 900);
   }
   S.malaise = null;
+  const cb = S.cab, cbExtra = [];
+  if (cb && cb.shown && cb.type === 'fight') {
+    if (cb.called) setTimeout(() => msg(`🛡 La sécurité sépare les voyageurs de la V${cb.car + 1}`, '#7dff8a', 3.5), 900);
+    else {   // la bagarre continue sur le quai : un des deux bloque une porte
+      pen(-30, 'Bagarre non signalée');
+      cbExtra.push(Object.assign(mkPerson(0, 0), cb.look2, { st: 'door', door: cb.car * 15 + 4, z: cb.car * 15 + 4, x: 0.25, t: 14, delay: 0, walk: 0, holder: true, fight: true }));
+      setTimeout(() => msg(`La bagarre continue dans une porte de la V${cb.car + 1} ! A : appel radio`, '#ff6b5b', 4), 900);
+    }
+  }
+  if (cb && cb.shown && cb.type === 'bag') {
+    const ex = cb.called ? 6 : 12;
+    if (!cb.called) pen(-50, 'Bagage abandonné non signalé');
+    S.medicT = ex; S.medicCar = cb.car; S.medicKind = 'bag';
+    setTimeout(() => msg(`🔎 Inspection du bagage en V${cb.car + 1} : ${ex} s${cb.called ? '' : ' (signalé trop tard)'}`, '#ffd75e', 4), 900);
+  }
+  if (cb && cb.shown && cb.type === 'slip') {
+    if (cb.falls === 0) { S.score += 20; setTimeout(() => msg('Conduite souple : aucune chute dans la V' + (cb.car + 1) + ' (+20)', '#7dff8a', 3), 900); }
+    else setTimeout(() => msg(`Sol nettoyé en V${cb.car + 1} (${cb.falls} chute${cb.falls > 1 ? 's' : ''})`, '#ffd75e', 3), 900);
+  }
+  if (cb && cb.shown && cb.type === 'vendor') {
+    if (cb.called) {   // il descend avec son gros sac : sa porte reste occupée un moment
+      cbExtra.push(Object.assign(mkPerson(0, 0), cb.look, { st: 'out', door: cb.car * 15 + 11, z: cb.car * 15 + 11, x: 0.1, t: 5, delay: 0, walk: 0, extra: true, sp: 1.1 }));
+      setTimeout(() => msg(`Le vendeur descend en V${cb.car + 1}… avec son gros sac`, '#ffd75e', 3), 900);
+    } else pen(-20, 'Vente à la sauvette : plaintes de voyageurs');
+  }
+  if (cb && cb.shown && cb.type === 'sick') {
+    const c = cb.car; S.dirtyCar = c;
+    if (cb.called) { S.dirtyKeep = false; setTimeout(() => msg(`🧹 Nettoyage de la V${c + 1} : personne n'y monte à cette station`, '#ffd75e', 4), 900); }
+    else { S.dirtyKeep = true; pen(-40, 'Voyageur malade non signalé'); setTimeout(() => msg(`V${c + 1} souillée et jamais nettoyée : plus personne n'y monte jusqu'au terminus`, '#ff6b5b', 5), 900); }
+  }
+  S.cab = null;
   st.served = true; setupMirror(st); st.people = [];
   planEvents(st);
+  S.mp.push(...cbExtra);
   // pickpockets restés à bord : vol signalé, ou débarquement prévu par radio
   S.suspects.forEach(x => {
     S.mp.push(Object.assign(mkPerson(0, 0), SUSPECT_LOOK, { st: 'out', door: x.car * 15 + 11, z: x.car * 15 + 11, x: 0.1, sp: 1.6, t: 0.3, delay: 1, walk: 0 }));
@@ -892,14 +944,19 @@ function drawHint() {
   if (S.vacAlert > 0) hint = 'VEILLE AUTOMATIQUE : appuyez sur ESPACE, sinon freinage d\'urgence !';
   else if (S.annonce) hint = 'ANNONCE : tapez 1 ou 2 — Échap pour annuler';
   else if (hold && S.holdT > 2.5) hint = `Quelqu'un retient la porte en V${carOf(hold.door) + 1} ! A : appel radio`;
+  else if ((S.phase === 'dwell' || S.phase === 'alert') && S.alerted && blocked()) hint = `PORTE OCCUPÉE en V${carOf(busyDoor()) + 1} : attendez le cadre vert avant de fermer (⏎)`;
   else if (S.alarm) hint = 'ALARME : arrêtez le train 3 secondes';
-  else if (S.medicT > 0) hint = `SECOURS EN INTERVENTION en V${S.medicCar + 1} : portes ouvertes encore ${Math.ceil(S.medicT)} s`;
+  else if (S.medicT > 0) hint = `${S.medicKind === 'bag' ? 'INSPECTION DU BAGAGE' : 'SECOURS EN INTERVENTION'} en V${S.medicCar + 1} : portes ouvertes encore ${Math.ceil(S.medicT)} s`;
+  else if (S.dog && S.dog.seen && ['sit', 'trot', 'run'].includes(S.dog.state)) hint = `CHIEN SUR LA VOIE à ${Math.max(0, Math.round(S.dog.pos - S.pos))} m : ralentissez et klaxonnez (K), ou arrêtez-vous`;
   else if (S.person && S.person.state === 'track' && S.person.seen) hint = 'PERSONNE SUR LA VOIE : freinez jusqu\'à l\'arrêt ou klaxonnez (K)';
+  else if (S.cab && S.cab.shown && S.phase === 'drive' && S.cab.type === 'slip') hint = `SOL GLISSANT en V${S.cab.car + 1} : freinez en douceur, par petites touches sur S`;
+  else if (S.cab && S.cab.shown && !S.cab.called && S.phase === 'drive') hint = { sick: 'VOYAGEUR MALADE', fight: 'BAGARRE', bag: 'BAGAGE ABANDONNÉ', vendor: 'VENDEUR À LA SAUVETTE' }[S.cab.type] + ` en V${S.cab.car + 1} : ` + { sick: 'A pour prévenir le PCC', fight: 'A pour appeler la sécurité', bag: 'A pour le signaler', vendor: 'A pour faire une annonce' }[S.cab.type];
   else if (S.malaise && S.malaise.shown) hint = `MALAISE en V${S.malaise.car + 1} : arrêt obligatoire à ${STATIONS[S.next].name}${S.malaise.called ? '' : ' — A : prévenir le PCC'}`;
   else if (S.phase === 'drive' && STATIONS[S.next] && STATIONS[S.next].closed) hint = `${STATIONS[S.next].name} FERMÉE : traversez sans arrêt, 30 km/h max`;
   else if (S.blackout) hint = 'COUPURE D\'ÉCLAIRAGE : suivez la courbe, les panneaux 50 / 25 / 10 et les bips';
   else if (S.sigRed > 0) hint = 'Signal rouge : attendez le vert';
-  else if (S.limit) hint = `Travaux : ne dépassez pas ${S.limit} km/h`;
+  else if (S.limit && S.v * 3.6 > S.limit + 1) hint = `TROP VITE ! Au-delà de ${S.limit + DERAIL} km/h, la rame déraille : freinez (S)`;
+  else if (S.limit) hint = `Travaux : ne dépassez pas ${S.limit} km/h, sinon risque de déraillement`;
   else if (S.ebrake) hint = 'FREINAGE D\'URGENCE : traction coupée jusqu\'à l\'arrêt';
   else if (S.phase === 'drive' && S.vperm * 3.6 < 66 && S.v > S.vperm - 0.5) hint = `Vous êtes en avance : train devant à ${Math.max(0, Math.round(S.gap))} m, ne dépassez pas ${Math.round(S.vperm * 3.6)} km/h`;
   if (!hint) return;
@@ -933,7 +990,7 @@ function updateVacma(dt) {
     }
   } else {
     S.vacT -= dt;
-    if (S.vacT <= 0) { S.vacAlert = 3.5; S.vacBeep = 0; }
+    if (S.vacT <= 0) { S.vacAlert = 6.5; S.vacBeep = 0; }
   }
 }
 function vacmaAck() {
@@ -942,7 +999,7 @@ function vacmaAck() {
 }
 
 // ---------- Fin de partie (game over) ----------
-const MISS_MAX = 3, TRAF_MAX = 1.0;
+const MISS_MAX = 3, TRAF_MAX = 1.0, DERAIL = 20;   // déraillement au-delà de limite + 20 km/h
 function gameOver(title, reason) {
   if (S.over || S.mode !== 'running') return;
   S.over = { title, reason, t: 0 };
@@ -972,7 +1029,8 @@ function startLeg() {
   if (sus) S.theft = { car: sus.car, at: S.clock + 2 + Math.random() * 4, shown: false };
   S.inc = null; S.limit = 0; S.sigRed = 0; S.sigPos = null; S.alarm = null; S.overT = 0;
   if (S.next >= STATIONS.length) return;
-  S.person = null; S.blackout = 0; S.malaise = null;
+  S.person = null; S.dog = null; S.blackout = 0; S.malaise = null; S.cab = null;
+  if (!S.dirtyKeep) S.dirtyCar = -1;
   const n = STATIONS[S.next], cur = STATIONS[S.cur], L = LN(), r = Math.random() * 0.7 / L.inc;   // probabilité d'événement = L.inc
   const D = n.pos - cur.pos, last = S.next === STATIONS.length - 1;
   let text = '', add = 0, col = '#ffb35e';
@@ -1004,7 +1062,19 @@ function startLeg() {
     S.inc = 'blackout'; S.blackout = 1; S.blackT = 0;
     text = 'Coupure d\'éclairage ! Fiez-vous aux phares, aux panneaux, à la courbe et aux bips.';
   }
+  else if (r < 0.80 && D > 160) {   // 9. chien errant sur la voie : il trottine devant la rame, le klaxon le fait courir
+    S.inc = 'dog';
+    S.dog = { pos: cur.pos + D * (0.3 + Math.random() * 0.2), x: (Math.random() - 0.5) * 0.6, state: 'sit', seen: false, hit: false,
+      walk: 0, stT: 1.5, runT: 0, horns: 0, wag: 0, col: pick(['#8a5a2a', '#2a2420', '#c8a060', '#e8e0d0', '#6a6a6a']) };
+  }
   if (text) msg(text, col, 5);   // le temps perdu n'est pas rendu : il faudra le rattraper
+  // incidents à bord (vus sur la caméra intérieure), tirés à part : ils s'ajoutent aux incidents de voie
+  if (Math.random() < Math.min(0.65, 0.2 + 0.5 * L.inc)) {
+    const types = ['sick', 'fight', 'bag', 'slip', 'vendor'].filter(t => t !== 'sick' || S.dirtyCar < 0);
+    S.cab = { type: pick(types), car: Math.floor(Math.random() * 5), at: S.clock + 3 + Math.random() * 6, shown: false, called: false, t: 0,
+      look: mkPerson(0, 0), look2: mkPerson(0, 0), side: [mkPerson(0, 0), mkPerson(0, 0)], falls: 0, fallT: 0, hardT: 0 };
+    if (S.cab.type === 'vendor') Object.assign(S.cab.look, { outfit: 'puffer', c: '#3a3a44', hat: 'cap' });
+  }
 }
 function updateEvents(dt) {
   if (S.phase !== 'drive') return;
@@ -1025,12 +1095,60 @@ function updateEvents(dt) {
       if (pe.x <= -2.0) { pe.state = 'safe'; if (!pe.hit) { S.score += 40; msg('Voie dégagée, personne en sécurité (+40)', '#7dff8a', 3); } }
     }
   }
+  // chien errant : alterne assis / trottine ; s'enfuit en courant au klaxon, quitte la voie si on s'arrête
+  const dg = S.dog;
+  if (dg && dg.state !== 'safe') {
+    const dp = dg.pos - S.pos, st = STATIONS[S.next];
+    dg.wag += dt * (dg.state === 'sit' ? 10 : 4);
+    if (!dg.seen && dp < 120) {
+      dg.seen = true; msg('🐕 CHIEN SUR LA VOIE ! Ralentissez, klaxonnez (K)', '#ff4a3a', 4);
+      for (let i = 0; i < 2; i++) beep(1250, 0.12, 'square', 0.05, i * 0.18);
+    }
+    if (dg.state === 'sit' || dg.state === 'trot') {
+      dg.stT -= dt;
+      if (dg.stT <= 0) { dg.state = dg.state === 'sit' ? 'trot' : 'sit'; dg.stT = dg.state === 'trot' ? 2 + Math.random() * 2 : 1 + Math.random() * 1.5; }
+      if (dg.state === 'trot') { dg.pos += 2.6 * dt; dg.walk += dt * 9; }
+      if (S.v === 0 && dp > 0 && dp < 60) { dg.stT2 = (dg.stT2 || 0) + dt; if (dg.stT2 > 2) { dg.state = 'leaving'; msg('Rame à l\'arrêt : le chien s\'éloigne de la voie', '#9fe0ff', 2.5); } }
+    } else if (dg.state === 'run') {
+      dg.runT -= dt; dg.pos += 7 * dt; dg.walk += dt * 16;
+      if (dg.runT <= 0) { dg.state = 'sit'; dg.stT = 1 + Math.random(); }
+    }
+    if (st && dg.pos > st.pos - 45 && dg.state !== 'leaving') { dg.state = 'leaving'; }   // il ne va pas jusqu'au quai
+    if (dg.state === 'leaving') {
+      dg.x = Math.max(-2.1, dg.x - dt * 2.2); dg.walk += dt * 14;
+      if (dg.x <= -2.1) { dg.state = 'safe'; if (!dg.hit) { S.score += 30; msg('Voie dégagée, le chien est sain et sauf (+30)', '#7dff8a', 3); } }
+    }
+    if (dg.state !== 'safe' && dg.state !== 'leaving' && dp < 1.2 && dp > -2 && S.v > 0.3 && !dg.hit) {
+      dg.hit = true; dg.state = 'safe'; S.ebrake = true;
+      pen(-60, 'Chien percuté : freinage d\'urgence');
+      noise(0.25, 0.3, 'lowpass', 300, 0.5);
+    }
+  }
   // malaise : l'interphone sonne quelques secondes après le départ
   const ml = S.malaise;
   if (ml && !ml.shown && S.clock >= ml.at) {
     ml.shown = true;
     msg(`📞 Interphone V${ml.car + 1} : malaise voyageur ! Arrêt obligatoire à ${STATIONS[S.next].name}. A : prévenir le PCC`, '#ff6b5b', 6);
     for (let i = 0; i < 4; i++) beep(i % 2 ? 700 : 900, 0.15, 'sine', 0.05, i * 0.2);
+  }
+  const sk = S.cab;
+  if (sk && !sk.shown && S.clock >= sk.at) {
+    sk.shown = true; const v = `V${sk.car + 1}`;
+    msg('📞 Interphone ' + v + ' : ' + {
+      sick: 'un voyageur est malade ! A : prévenir le PCC pour le nettoyage',
+      fight: 'bagarre entre voyageurs ! A : appeler la sécurité',
+      bag: 'bagage abandonné sur un siège ! A : le signaler au PCC',
+      slip: 'café renversé, le sol glisse ! Freinez en douceur jusqu\'à la station',
+      vendor: 'un vendeur à la sauvette passe dans la rame. A : annonce au micro',
+    }[sk.type], '#ff6b5b', 6);
+    for (let i = 0; i < 4; i++) beep(i % 2 ? 700 : 900, 0.15, 'sine', 0.05, i * 0.2);
+  }
+  if (sk && sk.shown) {
+    sk.t += dt; sk.fallT = Math.max(0, sk.fallT - dt);
+    if (sk.type === 'slip') {   // freinage appuyé trop longtemps (ou d'urgence) : un voyageur tombe
+      sk.hardT = (S.brakeF >= 0.95 || S.ebrake) && S.v > 1 ? sk.hardT + dt : 0;
+      if (sk.hardT > 0.35 && sk.fallT <= 0) { sk.falls++; sk.fallT = 2.5; sk.hardT = 0; pen(-15, `Voyageur tombé en V${sk.car + 1} : freinage trop brusque`); noise(0.2, 0.2, 'lowpass', 400, 0.6); }
+    }
   }
   if (S.blackout) S.blackT += dt;
 }
@@ -1205,7 +1323,7 @@ function update(dt) {
   if (S.phase === 'dwell' || S.phase === 'alert') S.doors = Math.min(1, S.doors + dt / 0.8);
   if (S.phase === 'closing') {
     if (blocked()) {
-      pen(-30, 'Voyageur coincé ! Réouverture'); sfxDoorBump();
+      pen(-30, `Voyageur coincé dans une porte de V${carOf(busyDoor()) + 1} ! Réouverture`); sfxDoorBump();
       S.phase = 'dwell'; S.alerted = false;
     } else {
       S.doors -= dt / 1.3;
@@ -1259,6 +1377,9 @@ function update(dt) {
     S.sigRed -= dt;
     if (S.sigRed <= 0) { msg('Signal vert', '#7dff8a', 1.5); beep(880, 0.15, 'sine', 0.05); }
     else if (S.phase === 'drive' && S.pos > S.sigPos - 0.3) { S.sigRed = 0; pen(-50, 'Franchissement de signal rouge !'); }
+  }
+  if (S.limit && S.phase === 'drive' && S.v * 3.6 > S.limit + DERAIL) {
+    gameOver('Déraillement', `Vous avez dépassé ${S.limit + DERAIL} km/h dans la zone limitée à ${S.limit} km/h.`);
   }
   if (S.limit && S.phase === 'drive' && S.v * 3.6 > S.limit + 1) {
     S.overT += dt;
@@ -2001,6 +2122,41 @@ function drawWheelchair(sx, sy, sc, pp, t, D1, D2, D3) {
   return { hand: [wx + dir * wr * 0.4, wy - wr * 0.6], top: hy - hr };
 }
 
+// chien vu de dos (il regarde vers le fond du tunnel) ; en fuite latérale, vu de profil
+function drawDog(dg, d) {
+  const sc = 2.4 * F / d; if (sc * 0.6 < 1.2) return;   // un peu exagéré pour rester lisible de loin
+  const [bx, by] = P(dg.x, -2, d), side = dg.state === 'leaving';
+  const col = pc(dg.col), dark = pc(dg.col, 0.7), step = Math.sin(dg.walk) * (dg.state === 'sit' ? 0 : 1);
+  g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(bx, by, sc * (side ? 0.45 : 0.22), sc * 0.04, 0, 0, 7); g.fill();
+  if (!side) {
+    const sit = dg.state === 'sit', bh = sc * (sit ? 0.42 : 0.36), bw = sc * 0.2;
+    // pattes arrière
+    g.fillStyle = dark;
+    g.fillRect(bx - bw * 0.85, by - sc * 0.22 + step * sc * 0.03, bw * 0.45, sc * 0.22 - step * sc * 0.03);
+    g.fillRect(bx + bw * 0.4, by - sc * 0.22 - step * sc * 0.03, bw * 0.45, sc * 0.22 + step * sc * 0.03);
+    // corps (arrière-train)
+    g.fillStyle = col; g.beginPath(); g.ellipse(bx, by - sc * 0.22 - bh * 0.35, bw, bh * 0.55, 0, 0, 7); g.fill();
+    // tête et oreilles au-dessus
+    const hy = by - sc * 0.22 - bh * 0.95;
+    g.beginPath(); g.arc(bx, hy, sc * 0.12, 0, 7); g.fill();
+    g.fillStyle = dark; g.beginPath(); g.moveTo(bx - sc * 0.12, hy - sc * 0.02); g.lineTo(bx - sc * 0.07, hy - sc * 0.17); g.lineTo(bx - sc * 0.02, hy - sc * 0.06); g.fill();
+    g.beginPath(); g.moveTo(bx + sc * 0.12, hy - sc * 0.02); g.lineTo(bx + sc * 0.07, hy - sc * 0.17); g.lineTo(bx + sc * 0.02, hy - sc * 0.06); g.fill();
+    // queue qui remue
+    const ta = Math.sin(dg.wag) * 0.7;
+    g.strokeStyle = col; g.lineWidth = Math.max(1 / RES, sc * 0.045); g.lineCap = 'round';
+    g.beginPath(); g.moveTo(bx, by - sc * 0.3); g.lineTo(bx + Math.sin(ta) * sc * 0.16, by - sc * 0.3 - Math.cos(ta) * sc * 0.14); g.stroke(); g.lineCap = 'butt';
+  } else {
+    // de profil, il court vers la gauche
+    const len = sc * 0.55, bh = sc * 0.18, ty = by - sc * 0.26;
+    g.fillStyle = dark;
+    for (const [lx, ph] of [[-0.2, 0], [-0.1, Math.PI], [0.15, Math.PI], [0.24, 0]]) { const sw = Math.sin(dg.walk + ph) * sc * 0.06; g.fillRect(bx + lx * len * 2 + sw, ty + bh * 0.4, sc * 0.05, sc * 0.26 - bh * 0.4); }
+    g.fillStyle = col; g.beginPath(); g.ellipse(bx, ty, len * 0.5, bh * 0.6, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(bx - len * 0.55, ty - bh * 0.6, sc * 0.1, sc * 0.08, 0, 0, 7); g.fill();
+    g.fillStyle = dark; g.beginPath(); g.moveTo(bx - len * 0.5, ty - bh * 0.9); g.lineTo(bx - len * 0.42, ty - bh * 1.5); g.lineTo(bx - len * 0.38, ty - bh * 0.8); g.fill();
+    g.strokeStyle = col; g.lineWidth = Math.max(1 / RES, sc * 0.04); g.beginPath(); g.moveTo(bx + len * 0.48, ty - bh * 0.2); g.lineTo(bx + len * 0.7, ty - bh * 0.9); g.stroke();
+  }
+}
+
 function collectSprites() {
   const list = [], yp = -0.95;
   if (S.mode === 'running' && S.gap > NEAR + 0.2 && S.gap < DMAX) list.push({ d: S.gap, draw: drawLeaderTail });
@@ -2010,6 +2166,13 @@ function collectSprites() {
       const [sx, sy] = P(pe.x, -2, d); PL_F = Math.max(0.25, 1 - d / 150); PL_FOG = FOG_TUN;
       drawPerson(sx, sy, F / d, pe.look, pe.state === 'leaving' ? pe.walk : 0); PL_F = 1;
       if (pe.state === 'track' && Math.floor(S.t * 4) % 2) { const [ax, ay] = P(pe.x, 0.2, d); txt('⚠', ax, ay, Math.min(28, Math.max(8, 0.9 * F / d)), '#ff4a3a', 'center'); }
+    } });
+  }
+  if (S.dog && S.dog.state !== 'safe') {
+    const dg = S.dog, dp = dg.pos - S.pos;
+    if (dp > NEAR + 0.3 && dp < DMAX) list.push({ d: dp, draw: d => {
+      PL_F = Math.max(0.25, 1 - d / 150); PL_FOG = FOG_TUN; drawDog(dg, d); PL_F = 1;
+      if (['sit', 'trot', 'run'].includes(dg.state)) { const [ax, ay] = P(dg.x, 0.6, d); txt('⚠', ax, ay, Math.min(26, Math.max(13, 1.2 * F / d)), Math.floor(S.t * 4) % 2 ? '#ffb35e' : '#ff4a3a', 'center'); }
     } });
   }
   if (S.sigPos !== null) {
@@ -2263,7 +2426,8 @@ function drawCCTV() {
     txt(`CAM ${car + 1} · V${car + 1}`, SX + 3, SY + 8, 9, '#e6ecf5');
     if (S.medicT > 0 && car === S.medicCar) {
       g.fillStyle = Math.floor(S.t * 3) % 2 ? '#ffffff' : '#ffd0d0'; g.fillRect(SX + CAM_W - 36, SY + CAM_H - 16, 34, 14);
-      g.fillStyle = '#d42a2a'; g.fillRect(SX + CAM_W - 33, SY + CAM_H - 12, 8, 2.5); g.fillRect(SX + CAM_W - 30.25, SY + CAM_H - 14.75, 2.5, 8);
+      if (S.medicKind === 'bag') { g.fillStyle = '#2a3a2a'; g.fillRect(SX + CAM_W - 34, SY + CAM_H - 14, 9, 9); g.fillStyle = '#ffb35e'; g.fillRect(SX + CAM_W - 31, SY + CAM_H - 16, 3, 2); }
+      else { g.fillStyle = '#d42a2a'; g.fillRect(SX + CAM_W - 33, SY + CAM_H - 12, 8, 2.5); g.fillRect(SX + CAM_W - 30.25, SY + CAM_H - 14.75, 2.5, 8); }
       txt(`${Math.ceil(S.medicT)} s`, SX + CAM_W - 4, SY + CAM_H - 5, 10, '#d42a2a', 'right');
     }
     const cf = Math.min(1, S.cars[car] / CAR_CAP);
@@ -2273,7 +2437,16 @@ function drawCCTV() {
     if (S.suspects.some(x => x.car === car)) {
       g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(SX + 90, SY + 1, 12, 9); drawSkull(SX + 96, SY + 9, 1);
     }
-    if (cf >= 1) { g.fillStyle = 'rgba(160,20,20,0.85)'; g.fillRect(SX + CAM_W / 2 - 22, SY + CAM_H - 12, 44, 10); txt('COMPLET', SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
+    if (car === S.dirtyCar) { g.fillStyle = 'rgba(120,100,10,0.9)'; g.fillRect(SX + CAM_W / 2 - 30, SY + CAM_H - 12, 60, 10); txt(S.dirtyKeep ? 'SOUILLÉE' : 'NETTOYAGE', SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
+    else if (cf >= 1) { g.fillStyle = 'rgba(160,20,20,0.85)'; g.fillRect(SX + CAM_W / 2 - 22, SY + CAM_H - 12, 44, 10); txt('COMPLET', SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
+    if (S.doors > 0 && S.alerted) for (const dz of [z0 + 4, z0 + 11]) {   // après la sonnerie seulement
+      if (doorState(dz) !== 2) continue;
+      const cx = SX + (dz - z0 - CAM_CROP) * (112 / 15) * CAM_K, hw = 0.95 * (112 / 15) * CAM_K;
+      g.strokeStyle = flash ? '#ff2a2a' : '#ffd0c8'; g.lineWidth = 2.5;
+      g.strokeRect(cx - hw, SY + 12, hw * 2, CAM_H - 16);
+      g.fillStyle = flash ? 'rgba(200,20,20,0.92)' : 'rgba(120,10,10,0.92)'; g.fillRect(cx - 21, SY + 12, 42, 10);
+      txt('OCCUPÉE', cx, SY + 20, 10, '#ffffff', 'center');
+    }
     const worst = Math.max(doorState(z0 + 4), doorState(z0 + 11));
     g.fillStyle = S.doors <= 0 ? '#5a6270' : worst === 2 ? (flash ? '#ff2a2a' : '#7a1010') : worst === 1 ? '#ffb35e' : '#3dff6a';
     g.beginPath(); g.arc(SX + CAM_W - 6, SY + 6, 3, 0, 7); g.fill();
@@ -2457,7 +2630,7 @@ function drawCab() {
   }
   const mark = (v, c) => { const a = ang(v); g.strokeStyle = c; g.lineWidth = 1.4; g.beginPath(); g.moveTo(gx0 + Math.cos(a) * (R - 4.5), gy0 + Math.sin(a) * (R - 4.5)); g.lineTo(gx0 + Math.cos(a) * (R + 1.4), gy0 + Math.sin(a) * (R + 1.4)); g.stroke(); };
   if (running && S.phase === 'drive' && S.vperm < VMAX) mark(S.vperm * 3.6, '#4fc8ff');
-  if (S.limit) mark(S.limit, '#ffb35e');
+  if (S.limit) { mark(S.limit, '#ffb35e'); mark(S.limit + DERAIL, '#d42a2a'); }
   sans(String(kmh), gx0, gy0 + 8.5, 5.5, '#ffd75e', 'center', 0, true);
   const na = ang(S.v * 3.6);
   g.strokeStyle = '#ff7a2a'; g.lineWidth = 1.2; g.lineCap = 'round';
@@ -2548,7 +2721,7 @@ function drawCab() {
   // à quai (et juste après la fermeture) : bloc « portes », dans l'ordre de la manœuvre
   const justClosed = S.phase === 'drive' && S.v < 0.3 && S.next < STATIONS.length && S.pos - STATIONS[S.cur].pos < 1;
   if (running && (atStation || justClosed)) {
-    const busy = S.mp.some(m => (m.delay <= 0 && m.st === 'door') || m.st === 'out');
+    const busy = S.doors > 0 && S.alerted && blocked();
     const step = S.phase === 'dwell' ? 'P' : S.phase === 'alert' ? '⏎' : justClosed ? 'Z' : '';
     const urgent = S.phase === 'dwell' && S.next < STATIONS.length && S.clock >= STATIONS[S.cur].dep - 4;
     const pulse = 0.5 + 0.5 * Math.sin(S.t * (urgent || step === 'Z' ? 10 : 5));
@@ -2564,14 +2737,14 @@ function drawCab() {
       sans(label, x, cy + 12, 4.4, active ? '#ffffff' : '#8a909c', 'center', 0, active);
     };
     big(216, 'P', 'SONNERIE', '#ffd75e', step === 'P', false);
-    big(244, '⏎', busy && S.phase === 'alert' ? 'ATTENDEZ' : 'FERMETURE', '#ff9a3a', step === '⏎' && !busy, step === '⏎' && busy);
+    big(244, '⏎', busy ? 'ATTENDEZ' : 'FERMETURE', '#ff9a3a', step === '⏎' && !busy, busy);
     big(272, 'Z', 'DÉPART', '#7dff8a', step === 'Z', false);
     // voyant PORTES : rouge ouvertes, orange en fermeture, vert verrouillées
-    const dc = mute(S.doors <= 0 ? '#3dff6a' : S.phase === 'closing' ? (blink ? '#ffb35e' : '#7a4a10') : '#ff3a2a', 0.25);
+    const dc = mute(S.doors <= 0 ? '#3dff6a' : S.phase === 'closing' || busy ? (blink ? '#ffb35e' : '#7a4a10') : '#ff3a2a', 0.25);
     g.fillStyle = '#0a0b0e'; g.fillRect(285, cy - 9, 12, 12);
     g.fillStyle = dc; g.fillRect(286.5, cy - 7.5, 9, 9);
     glow(291, cy - 3, 9, [1, 3, 5].map(i => parseInt(dc.slice(i, i + 2), 16)).join(','), 0.3);
-    sans('PORTES', 291, cy + 12, 4.2, '#8a909c', 'center');
+    sans('PORTES', 291, cy + 12, 4.2, busy ? (blink ? '#ffb35e' : '#c08a4a') : '#8a909c', 'center', 0, busy);
   } else {
   btn(214, 'PORTES', S.doors <= 0, '#3dff6a');
   btn(238, 'SONN.', S.buzzT > 0, '#ffd75e');
@@ -2874,16 +3047,150 @@ function drawAnnonce() {
   txt('2  « Ne retenez pas les portes »', x + 10, y + 41, 12, '#e6ecf5', 'left', 'VT323', w - 20);
   if (S.annCd > 0) txt(`dispo dans ${Math.ceil(S.annCd)} s`, x + w - 8, y + 12, 10, '#8fa0b8', 'right');
 }
+// caméra intérieure incrustée : incidents à bord (malade, bagarre, bagage, sol glissant, vendeur)
+function cabBackground(t) {
+  g.fillStyle = '#c9ccd0'; g.fillRect(0, 0, 112, 9);
+  g.fillStyle = '#f2f0e6'; g.fillRect(4, 3, 104, 2);                      // néon
+  g.fillStyle = '#e3e6e8'; g.fillRect(0, 9, 112, 25);
+  for (const wx of [6, 44, 82]) {
+    g.fillStyle = '#161a20'; g.fillRect(wx, 12, 26, 13);
+    const off = (S.pos * 4) % 40;
+    g.fillStyle = 'rgba(255,214,150,0.55)'; for (let k = -1; k < 2; k++) { const lx = wx + ((k * 40 - off + 400) % 40); if (lx > wx && lx < wx + 24) g.fillRect(lx, 17, 2, 1); }
+  }
+  for (let k = 0; k < 4; k++) { g.fillStyle = k % 2 ? '#2e6fb8' : '#2a64a6'; g.fillRect(4 + k * 27, 26, 24, 10); g.fillStyle = '#1f4f8a'; g.fillRect(4 + k * 27, 35, 24, 4); }
+  g.fillStyle = '#8c8984'; g.fillRect(0, 39, 112, 33);
+  g.fillStyle = 'rgba(0,0,0,0.08)'; for (let k = 0; k < 30; k++) g.fillRect(hsh(k, 61) * 112, 40 + hsh(k, 62) * 32, 1, 0.5);
+  g.fillStyle = '#c8ccd2'; g.fillRect(30, 0, 1.5, 72); g.fillRect(84, 0, 1.5, 72);
+}
+function drawCabCam() {
+  const sk = S.cab; if (!sk || !sk.shown || S.phase !== 'drive') return;
+  const K = 1.3, pop = Math.min(1, sk.t * 5), w = Math.round(112 * K * pop), h = Math.round(72 * K * pop), x0 = 8, y0 = VIEW_H - 8 - Math.round(72 * K);
+  const ok = sk.called || (sk.type === 'slip' && sk.fallT <= 0), flash = Math.floor(S.t * 4) % 2;
+  g.fillStyle = '#0d0f14'; g.fillRect(x0 - 3, y0 - 3, w + 6, h + 6);
+  g.strokeStyle = sk.called ? '#3a6a44' : (flash ? '#ff4a3a' : '#7a1a14'); g.lineWidth = 1.5; g.strokeRect(x0 - 2.25, y0 - 2.25, w + 4.5, h + 4.5);
+  if (pop < 1) return;
+  g.save(); g.beginPath(); g.rect(x0, y0, w, h); g.clip(); g.translate(x0, y0); g.scale(K, K); DRAW_K = K;
+  const t = sk.t, fy = 50, away = Math.min(1, t / 3);       // fy : niveau du sol (pieds)
+  cabBackground(t);
+  const person = (x, pp, dir, walk = 0) => drawPerson(x, fy + 7, 20, Object.assign(pp, { dir }), walk);
+  if (sk.type === 'sick') {
+  // flaque qui s'étale
+  const px = 61, pr = Math.min(1, t / 6);
+  g.fillStyle = '#9a9440'; g.beginPath(); g.ellipse(px, fy + 2, 3 + 9 * pr, 1.5 + 3 * pr, 0, 0, 7); g.fill();
+  g.fillStyle = '#b8b058'; g.beginPath(); g.ellipse(px - 1, fy + 1.5, 2 + 5 * pr, 1 + 1.6 * pr, 0, 0, 7); g.fill();
+    person(22 - 10 * away, sk.side[0], -1); person(96 + 9 * away, sk.side[1], 1);
+  // le malade, assis et penché en avant ; spasmes réguliers
+  const L = sk.look, cyc = (t % 2.6) / 2.6, heave = cyc > 0.55 && cyc < 0.85;
+  const bend = 0.95 + (heave ? 0.25 : 0.08 * Math.sin(t * 3));
+  const hx = 52, hy = 37;                                   // hanche
+  g.fillStyle = L.pants; g.fillRect(hx, hy - 1, 8, 3); g.fillRect(hx + 6, hy, 3, fy - hy);   // cuisses, tibias
+  g.fillStyle = '#141414'; g.fillRect(hx + 6, fy - 1, 5, 2);
+  g.save(); g.translate(hx + 1, hy); g.rotate(bend);
+  g.fillStyle = L.c; g.fillRect(-2.5, -13, 5.5, 13);                       // buste
+  g.fillStyle = L.k; g.beginPath(); g.arc(0.5, -15.5, 3, 0, 7); g.fill();   // tête
+  g.fillStyle = L.hair; g.fillRect(-2.5, -18.5, 6, 2.2);
+  g.fillStyle = L.k; g.fillRect(2, -11, 2, 7);                              // bras sur le ventre
+  g.restore();
+  // jet (pendant les spasmes)
+  const mx = hx + 1 + Math.sin(bend) * 15.5, my = hy - Math.cos(bend) * 15.5 + 2;
+  if (heave) {
+    for (let k = 0; k < 9; k++) {
+      const q = ((S.t * 3 + k / 9) % 1);
+      g.fillStyle = k % 2 ? '#a8a24a' : '#c4bc62';
+      g.fillRect(mx + q * 3 + hsh(k, 63) * 1.5, my + q * (fy + 1 - my), 1.4, 1.4);
+    }
+  }
+  } else if (sk.type === 'fight') {
+    // deux voyageurs se bousculent, les autres reculent
+    person(14 - 8 * away, sk.side[0], -1); person(100 + 8 * away, sk.side[1], 1);
+    const shove = Math.sin(t * 7), lunge = Math.max(0, Math.sin(t * 3.1));
+    person(48 + shove * 2.5 + lunge * 3, sk.look, 1, t * 6); person(66 + shove * 2.5 - lunge * 2, sk.look2, -1, t * 6 + 1);
+    g.fillStyle = flash ? '#ffd75e' : '#ff8a3a'; for (const [ax, ay] of [[52, 12], [60, 9], [68, 13]]) { const oy = flash ? 0 : 1; g.fillRect(ax, ay + oy, 1.4, 4); g.fillRect(ax, ay + oy + 5, 1.4, 1.4); }
+    g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 0.6;
+    for (let k = 0; k < 3; k++) { const yy = 24 + k * 5; g.beginPath(); g.moveTo(56 + shove * 2, yy); g.lineTo(60 + shove * 2, yy - 1); g.stroke(); }
+  } else if (sk.type === 'bag') {
+    // un sac seul sur la banquette, personne autour
+    person(12, sk.side[0], 1); person(104, sk.side[1], -1);
+    const bx = 56, by = 26;
+    g.fillStyle = '#2a3a2a'; g.fillRect(bx, by, 11, 10); g.fillStyle = '#3a4a38'; g.fillRect(bx, by, 11, 3);
+    g.fillStyle = '#1a221a'; g.fillRect(bx + 2, by - 2, 1.2, 3); g.fillRect(bx + 8, by - 2, 1.2, 3); g.fillRect(bx + 3, by + 5, 5, 3);
+    if (!sk.called) { g.strokeStyle = flash ? '#ffd75e' : 'rgba(255,215,94,0.35)'; g.lineWidth = 1; g.beginPath(); g.ellipse(bx + 5.5, by + 5, 11, 9, 0, 0, 7); g.stroke(); }
+  } else if (sk.type === 'slip') {
+    // café renversé, voyageurs qui se tiennent aux barres ; chute après un freinage brusque
+    g.fillStyle = '#5a3a1e'; g.beginPath(); g.ellipse(60, fy + 4, 13, 3.5, 0, 0, 7); g.fill();
+    g.fillStyle = '#7a5230'; g.beginPath(); g.ellipse(58, fy + 3.5, 7, 1.8, 0, 0, 7); g.fill();
+    g.fillStyle = '#f2efe6'; g.fillRect(68, fy + 3, 4, 2.5); g.fillStyle = '#c8392b'; g.fillRect(68, fy + 3, 1, 2.5);   // gobelet couché
+    person(30, sk.side[0], 1); person(86, sk.side[1], -1);
+    if (sk.fallT > 0) {
+      const k = Math.min(1, (2.5 - sk.fallT) * 5);
+      g.save(); g.translate(52, fy + 7); g.rotate(-Math.PI / 2 * k); drawPerson(0, 0, 20, Object.assign(sk.look, { dir: 1 }), 0); g.restore();
+    } else person(54 + Math.sin(t * 2.2) * 1.2, sk.look, 1);
+    g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(82, 10, 28, 8);
+    txt(`chutes ${sk.falls}`, 96, 16.5, 8, sk.falls ? '#ff8a7a' : '#7dff8a', 'center');
+  } else if (sk.type === 'vendor') {
+    // le vendeur traverse la voiture avec son grand sac
+    person(28, sk.side[0], 1); person(90, sk.side[1], -1);
+    const vx = 6 + (t * 11) % 104;
+    g.fillStyle = '#e8e4da'; g.fillRect(vx - 13, fy - 10, 9, 15); g.fillStyle = '#2e6fb8'; g.fillRect(vx - 13, fy - 6, 9, 2); g.fillRect(vx - 13, fy - 1, 9, 2);   // grand sac rayé
+    person(vx, sk.look, 1, t * 8);
+    g.fillStyle = '#d4ac0d'; g.fillRect(vx + 2, fy - 16, 7, 2); g.fillStyle = '#c0392b'; g.fillRect(vx + 3, fy - 18, 2, 2); g.fillStyle = '#3a8f5a'; g.fillRect(vx + 6, fy - 18, 2, 2);   // plateau
+  }
+  g.restore(); DRAW_K = 1;
+  drawCRT(x0, y0, w, h, 7);
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x0, y0, w, 9);
+  txt(`CAM V${sk.car + 1} · INTÉRIEUR`, x0 + 3, y0 + 7, 9, '#ffffff');
+  if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#ff2a2a'; g.beginPath(); g.arc(x0 + w - 5, y0 + 4.5, 2, 0, 7); g.fill(); }
+  const foot = sk.type === 'slip' ? 'Freinez en douceur jusqu\'à la station'
+    : sk.called ? { sick: 'PCC prévenu : nettoyage en station', fight: 'Sécurité prévenue : elle attend à quai', bag: 'Signalé : inspection en station', vendor: 'Annonce faite : il descend en station' }[sk.type]
+    : { sick: 'A : prévenir le PCC', fight: 'A : appeler la sécurité', bag: 'A : signaler le bagage', vendor: 'A : annonce au micro' }[sk.type];
+  g.fillStyle = sk.called ? 'rgba(20,70,30,0.9)' : sk.type === 'slip' ? 'rgba(110,70,10,0.92)' : 'rgba(120,10,10,0.9)'; g.fillRect(x0, y0 + h - 11, w, 11);
+  txt(foot, x0 + w / 2, y0 + h - 3, 10, '#ffffff', 'center', 'VT323', w - 4);
+}
 function drawTheft() {
   const T = S.theft; if (!T || !T.shown || S.phase !== 'drive') return;
-  const pop = Math.min(1, T.t * 6), w = Math.round(230 * pop), h = Math.round(46 * pop), x = W / 2 - w / 2, y = 26;
-  const flash = Math.floor(S.t * 5) % 2;
-  g.fillStyle = flash ? 'rgba(150,10,10,0.95)' : 'rgba(90,6,6,0.95)'; g.fillRect(x, y, w, h);
-  g.fillStyle = '#ffd75e'; g.fillRect(x, y, w, 2); g.fillRect(x, y + h - 2, w, 2);
+  // caméra intérieure, zoom sur la poche d'un voyageur : une main s'y glisse et ressort avec le portefeuille
+  const K = 1.3, pop = Math.min(1, T.t * 5), w = Math.round(112 * K * pop), h = Math.round(72 * K * pop);
+  const x0 = W - 8 - Math.round(112 * K), y0 = VIEW_H - 8 - Math.round(72 * K), flash = Math.floor(S.t * 4) % 2;
+  g.fillStyle = '#0d0f14'; g.fillRect(x0 - 3, y0 - 3, w + 6, h + 6);
+  g.strokeStyle = flash ? '#ff4a3a' : '#7a1a14'; g.lineWidth = 1.5; g.strokeRect(x0 - 2.25, y0 - 2.25, w + 4.5, h + 4.5);
   if (pop < 1) return;
-  drawSkull(x + 18, y + 26, 3); drawSkull(x + w - 18, y + 26, 3);
-  txt(`VOL SIGNALÉ — VOITURE ${T.car + 1}`, W / 2, y + 18, 16, '#ffffff', 'center', 'VT323', w - 60);
-  txt('Appuyez sur A : tirer l\'alarme', W / 2, y + 36, 14, flash ? '#ffd75e' : '#ffffff', 'center', 'VT323', w - 60);
+  if (!T.look) T.look = { coat: pick(['#3a4a5a', '#6a4a3a', '#4a5a3a', '#2e3440', '#7a6a50']), skin: pick(SKIN), sleeve: '#151518' };
+  const L = T.look;
+  g.save(); g.beginPath(); g.rect(x0, y0, w, h); g.clip(); g.translate(x0, y0); g.scale(K, K);
+  // arrière-plan flou : voyageurs serrés, barre de maintien
+  g.fillStyle = '#5a5e66'; g.fillRect(0, 0, 112, 72);
+  [['#8a3a3a', 4], ['#3a5a8a', 22], ['#9a8a5a', 38], ['#4a4a52', 92]].forEach(([c, bx]) => { g.fillStyle = c; g.globalAlpha = 0.55; g.fillRect(bx, 0, 16, 72); });
+  g.globalAlpha = 1; g.fillStyle = '#c8ccd2'; g.fillRect(46, 0, 2, 72);
+  // la victime, de côté : manteau, poche, sangle de sac
+  g.fillStyle = L.coat; g.fillRect(54, 0, 58, 72);
+  g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(54, 0, 3, 72);
+  g.fillStyle = '#1a1a1e'; g.fillRect(96, 0, 4, 72);                       // sangle
+  const pkX = 62, pkY = 40, pkW = 24, pkH = 16;
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(pkX, pkY, pkW, pkH);        // intérieur de la poche
+  // la main : approche, plonge dans la poche, ressort avec le portefeuille
+  const c = T.t % 4.2, ease = q => q * q * (3 - 2 * q);
+  let hx, hy, inside = false, wallet = false;
+  if (c < 1.4) { const q = ease(c / 1.4); hx = 14 + q * 44; hy = 30 + q * 14; }
+  else if (c < 2.6) { hx = 58 + Math.sin((c - 1.4) * 8) * 1.2; hy = 44 + Math.min(1, (c - 1.4) * 2) * 3; inside = true; }
+  else if (c < 3.8) { const q = ease((c - 2.6) / 1.2); hx = 58 - q * 44; hy = 47 - q * 16; wallet = true; }
+  else { hx = 14; hy = 31; }
+  g.fillStyle = L.sleeve; g.beginPath(); g.moveTo(-4, hy - 10); g.lineTo(hx - 4, hy - 3); g.lineTo(hx - 4, hy + 4); g.lineTo(-4, hy + 10); g.fill();   // manche
+  g.fillStyle = L.skin; g.fillRect(hx - 6, hy - 4, 12, 9); g.fillRect(hx + 6, hy - 3, 6, 2); g.fillRect(hx + 6, hy, 7, 2); g.fillRect(hx + 6, hy + 3, 5, 1.6); g.fillRect(hx - 2, hy - 6, 6, 2.5);   // main, doigts, pouce
+  g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 0.6; g.strokeRect(hx - 6, hy - 4, 12, 9);
+  if (wallet) { g.fillStyle = '#5a3a1e'; g.fillRect(hx + 2, hy - 1, 9, 6); g.fillStyle = '#7a5230'; g.fillRect(hx + 2, hy - 1, 9, 1.2); }
+  if (inside) { g.fillStyle = L.coat; g.fillRect(pkX, pkY + 3, pkW, pkH - 3); g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(pkX, pkY + 3, 1, pkH - 3); }   // le pan de la poche recouvre les doigts
+  g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 0.8; g.strokeRect(pkX, pkY, pkW, pkH);
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(pkX, pkY, pkW, 2);           // rabat
+  // cadre de mise au point
+  g.strokeStyle = flash ? 'rgba(255,80,60,0.9)' : 'rgba(255,255,255,0.6)'; g.lineWidth = 0.8;
+  for (const [cx, cy, dx, dy] of [[52, 22, 1, 1], [100, 22, -1, 1], [52, 64, 1, -1], [100, 64, -1, -1]]) { g.beginPath(); g.moveTo(cx + 6 * dx, cy); g.lineTo(cx, cy); g.lineTo(cx, cy + 6 * dy); g.stroke(); }
+  g.restore();
+  drawCRT(x0, y0, w, h, 11);
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x0, y0, w, 9);
+  txt(`CAM V${T.car + 1} · ZOOM ×4`, x0 + 3, y0 + 7, 9, '#ffffff');
+  drawSkull(x0 + w - 6, y0 + 8, 1);
+  g.fillStyle = flash ? 'rgba(150,10,10,0.95)' : 'rgba(100,6,6,0.95)'; g.fillRect(x0, y0 + h - 11, w, 11);
+  txt(`VOL en V${T.car + 1} — A : tirer l'alarme`, x0 + w / 2, y0 + h - 3, 10, flash ? '#ffd75e' : '#ffffff', 'center', 'VT323', w - 4);
 }
 function drawRadio() {
   if (!S.radio) return;
@@ -2998,7 +3305,7 @@ function drawHelp() {
     'Espace : veille automatique (quand elle sonne).',
     'M : missions   H : signaler les louches',
   ]);
-  txt('GAME OVER si : voyageur percuté · collision avec le train devant · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
+  txt('GAME OVER si : voyageur percuté · collision avec le train devant · déraillement · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
   txt('? ou Échap : reprendre', W / 2, 212, 9, '#8fa0b8', 'center');
 }
 function keycap(x, y, label, w = 12) {
@@ -3117,7 +3424,7 @@ function render() {
     vg.addColorStop(0, 'rgba(255,0,0,0)'); vg.addColorStop(1, `rgba(255,0,0,${0.3 * pz})`); g.fillStyle = vg; g.fillRect(0, 0, W, VIEW_H);
   }
   drawFx();
-  if (S.mode === 'running') { drawRadio(); drawAnnonce(); drawTheft(); }
+  if (S.mode === 'running') { drawCabCam(); drawRadio(); drawAnnonce(); drawTheft(); }
   if (S.mode === 'running' && S.missionShow > 0 && !S.radio) {
     g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 110, 54, 220, 50);
     drawMissions(W / 2 - 102, 66, false);

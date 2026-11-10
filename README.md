@@ -34,6 +34,7 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 ## Fin de partie
 
 - voyageur percuté sur la voie ;
+- déraillement : plus de 20 km/h au-dessus d'une limitation de vitesse (travaux) ;
 - collision avec le train qui vous précède ;
 - 3 arrêts ratés ;
 - trafic de la ligne saturé à 100 %.
