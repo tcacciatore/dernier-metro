@@ -56,19 +56,20 @@ cv.addEventListener('dblclick', toggleFullscreen);
 // ---------- Données ----------
 // Chaque ligne : stations dans l'ordre réel [nom, distance depuis la précédente (m), affluence].
 // Difficulté : foule (aff), arrivées sur les quais (acc), pickpockets, portes retenues,
-// fréquence des incidents, temps à quai (dwell) et marge de l'horaire (tight : 1,12 = 12 % de plus que le trajet le plus rapide).
+// fréquence des incidents, temps à quai (dwell) et marge de l'horaire (tight : 1,25 = 25 % de plus que le trajet le plus rapide :
+// une conduite franche et propre regagne quelques secondes par interstation, une conduite timide en perd).
 const LINES = [
   { id: 'l1', num: '1', col: '#ffcd00', fg: '#111', diff: 'FACILE', dcol: '#7dff8a', desc: 'Interstations régulières',
-    aff: 0.8, acc: 0.8, suspect: 0.2, holder: 0.12, inc: 0.45, dwell: 18, tight: 1.12, pax: 230,
+    aff: 0.8, acc: 0.8, suspect: 0.2, holder: 0.12, inc: 0.45, dwell: 18, tight: 1.25, pax: 230,
     st: [['Château de Vincennes', 0, 1.0], ['Bérault', 100, 0.5], ['Saint-Mandé', 100, 0.7], ['Porte de Vincennes', 100, 0.8], ['Nation', 100, 1.8], ['Reuilly – Diderot', 100, 1.0], ['Gare de Lyon', 100, 2.3], ['Bastille', 100, 1.5], ['Saint-Paul', 100, 0.6], ['Hôtel de Ville', 100, 1.4], ['Châtelet', 100, 2.4]] },
   { id: 'l6', num: '6', col: '#6eca97', fg: '#111', diff: 'MOYEN', dcol: '#ffd75e', desc: 'Distances variables',
-    aff: 1.0, acc: 1.0, suspect: 0.3, holder: 0.22, inc: 0.6, dwell: 16, tight: 1.08, pax: 260,
+    aff: 1.0, acc: 1.0, suspect: 0.3, holder: 0.22, inc: 0.6, dwell: 16, tight: 1.21, pax: 260,
     st: [['Nation', 0, 1.6], ['Picpus', 110, 0.6], ['Bel-Air', 95, 0.5], ['Daumesnil', 120, 1.1], ['Dugommier', 90, 0.6], ['Bercy', 140, 1.3], ['Quai de la Gare', 110, 0.8], ['Chevaleret', 100, 0.6], ['Nationale', 90, 0.7], ["Place d'Italie", 130, 1.8]] },
   { id: 'l4', num: '4', col: '#be418d', fg: '#ffffff', diff: 'DIFFICILE', dcol: '#ffb35e', desc: 'Grandes gares, pickpockets',
-    aff: 1.25, acc: 1.3, suspect: 0.45, holder: 0.3, inc: 0.7, dwell: 14, tight: 1.05, pax: 300,
+    aff: 1.25, acc: 1.3, suspect: 0.45, holder: 0.3, inc: 0.7, dwell: 14, tight: 1.17, pax: 300,
     st: [['Simplon', 0, 0.8], ['Marcadet – Poissonniers', 110, 1.3], ['Château Rouge', 95, 1.1], ['Barbès – Rochechouart', 90, 1.7], ['Gare du Nord', 120, 2.4], ["Gare de l'Est", 100, 2.0], ["Château d'Eau", 95, 0.8], ['Strasbourg – Saint-Denis', 90, 1.5], ['Réaumur – Sébastopol', 95, 1.2], ['Étienne Marcel', 95, 0.8], ['Les Halles', 110, 2.3]] },
   { id: 'l13', num: '13', col: '#98d4e2', fg: '#111', diff: 'EXTRÊME', dcol: '#ff4a3a', desc: 'La plus saturée de Paris',
-    aff: 1.5, acc: 1.6, suspect: 0.4, holder: 0.45, inc: 0.8, dwell: 12, tight: 1.03, pax: 330,
+    aff: 1.5, acc: 1.6, suspect: 0.4, holder: 0.45, inc: 0.8, dwell: 12, tight: 1.13, pax: 330,
     st: [['Saint-Lazare', 0, 2.4], ['Miromesnil', 110, 0.9], ['Champs-Élysées – Clemenceau', 120, 1.3], ['Invalides', 150, 1.5], ['Varenne', 90, 0.7], ['Saint-François-Xavier', 95, 0.8], ['Duroc', 100, 1.2], ['Montparnasse – Bienvenüe', 130, 2.4], ['Gaîté', 95, 0.8], ['Pernety', 100, 0.9], ['Plaisance', 95, 1.0]] },
 ];
 let LINE = 0;
@@ -239,7 +240,7 @@ function reset(mode) {
   buildLine();
   S = { mode, pos: 0, v: 0, clock: T0, cur: 0, next: 1, phase: 'dwell', doors: 1,
         alerted: false, buzzT: 0, msgs: [], score: 0, mp: [], t: 0, warnT: 0, hintT: 0, endT: -1,
-        combo: 0, base: 0, pax: 0, paxOffer: 0, load: 0, cars: [0, 0, 0, 0, 0], blockers: [0, 1, 2, 3, 4].map(() => mkPerson(0, 0)), out: 0, trafSum: 0, trafT: 0, trafBonus: 0, trafShow: 0, trafDown: 0, trafLvl: -1, trafMsgT: 0, fullWarn: false, pops: [], recap: null, fx: null, inc: null, limit: 0, overT: 0, sigPos: null, sigRed: 0, alarm: null, alarmAt: 0, newRecord: false, vacT: 35, vacAlert: 0, vacBeep: 0, radioT: 30, runners: 0, waves: 0, waveT: 0, over: null, missed: 0, trafWarn: false, trace: [], brakeF: 0, schedShow: 0, entryDelta: null, tickT: 0, tickHi: false, gap: 999, vperm: 99, gapT: 0, gapArmed: true, ebrake: false, person: null, dog: null, malaise: null, cab: null, dirtyCar: -1, dirtyKeep: false, medicT: 0, medicCar: 0, medicKind: 'medic', blackout: 0, blackT: 0, beepT: 0, secLost: 0, legPen: 0, rConfirm: 0, help: false, tuto: -1, tutoT: 0,
+        combo: 0, base: 0, pax: 0, paxOffer: 0, load: 0, cars: [0, 0, 0, 0, 0], blockers: [0, 1, 2, 3, 4].map(() => mkPerson(0, 0)), out: 0, trafSum: 0, trafT: 0, trafBonus: 0, trafShow: 0, trafDown: 0, trafLvl: -1, trafMsgT: 0, fullWarn: false, pops: [], recap: null, fx: null, inc: null, limit: 0, overT: 0, sigPos: null, sigRed: 0, alarm: null, alarmAt: 0, newRecord: false, vacT: 35, vacAlert: 0, vacBeep: 0, radioT: 30, runners: 0, waves: 0, waveT: 0, over: null, missed: 0, trafWarn: false, trace: [], brakeF: 0, schedShow: 0, entryDelta: null, tickT: 0, tickHi: false, gap: 999, vperm: 99, gapT: 0, gapArmed: true, ebrake: false, person: null, dog: null, malaise: null, cab: null, dirtyCar: -1, dirtyKeep: false, cleanT: 0, medicT: 0, medicCar: 0, medicKind: 'medic', blackout: 0, blackT: 0, beepT: 0, secLost: 0, legPen: 0, rConfirm: 0, help: false, tuto: -1, tutoT: 0,
         missions: pickMissions(), missionShow: 0, pstreak: 0, precCount: 0, suspects: [], caught: 0, suspectAt: -1, holderAt: -1, holderPending: false, radio: 0, holdT: 0, annonce: 0, annCd: 0, theft: null };
   STATIONS[0].served = true;
   setupMirror(STATIONS[0]);
@@ -461,7 +462,7 @@ function radioCall() {
   }
   const cb = S.cab;
   if (cb && cb.shown && !cb.called && cb.type !== 'slip' && S.phase === 'drive' && S.next < STATIONS.length) {
-    cb.called = true; const nn = STATIONS[S.next].name, v = `V${cb.car + 1}`;
+    cb.called = true; cb.calledAt = cb.t; const nn = STATIONS[S.next].name, v = `V${cb.car + 1}`;
     const [pts, txt0] = {
       sick: [20, `Radio : agent de nettoyage à ${nn}, la ${v} y sera fermée à la montée`],
       fight: [20, `Radio : la sécurité attend la ${v} à ${nn}`],
@@ -710,7 +711,7 @@ function arrive(st, err) {
   }
   if (cb && cb.shown && cb.type === 'sick') {
     const c = cb.car; S.dirtyCar = c;
-    if (cb.called) { S.dirtyKeep = false; setTimeout(() => msg(`🧹 Nettoyage de la V${c + 1} : personne n'y monte à cette station`, '#ffd75e', 4), 900); }
+    if (cb.called) { S.dirtyKeep = false; S.cleanT = 8; setTimeout(() => msg(`🧹 Nettoyage de la V${c + 1} : personne n'y monte pendant 8 s`, '#ffd75e', 4), 900); }
     else { S.dirtyKeep = true; pen(-40, 'Voyageur malade non signalé'); setTimeout(() => msg(`V${c + 1} souillée et jamais nettoyée : plus personne n'y monte jusqu'au terminus`, '#ff6b5b', 5), 900); }
   }
   S.cab = null;
@@ -891,14 +892,14 @@ function drawCRT(x, y, w, h, seed) {
     g.save(); g.fillStyle = '#0d0f14'; g.beginPath(); g.rect(x - 1, y - 1, w + 2, h + 2); g.roundRect(x, y, w, h, 7); g.fill('evenodd'); g.restore();
   }
 }
-// panneau de remplissage de la rame (à quai) : taux global, places libres, et les 5 voitures
+// panneau de remplissage de la rame (à quai) : taux global et les 5 voitures
 function drawFillPanel(x, y, w, h) {
   const ratio = S.load / CAP, free = Math.max(0, CAP - S.load), full = S.load >= CAP;
   const col = full ? '#ff4a3a' : ratio > 0.85 ? '#ffb35e' : ratio > 0.6 ? '#ffd75e' : '#7dff8a';
   g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(x, y, w, h);
   g.strokeStyle = '#4a5166'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   txt('RAME', x + 5, y + 10, 10, '#8fa0b8');
-  txt(full ? 'PLEINE' : `${Math.round(ratio * 100)} % · ${free} places`, x + w - 5, y + 10, 11, col, 'right', 'VT323', w - 34);
+  txt(full ? 'PLEINE' : `${Math.round(ratio * 100)} %`, x + w - 5, y + 10, 11, col, 'right', 'VT323', w - 34);
   // 5 voitures, de la tête (V1) à la queue (V5)
   const cw = (w - 10 - 4 * 3) / 5;
   for (let c = 0; c < 5; c++) {
@@ -1261,6 +1262,10 @@ function update(dt) {
     if (S.tickT <= 0) { beep(S.tickHi ? 2100 : 1700, 0.018, 'square', 0.025); S.tickHi = !S.tickHi; S.tickT = Math.max(0.25, 1 - (S.schedShow - 5) * 0.05); }
   } else S.tickT = 0;
   if (S.medicT > 0 && S.phase !== 'drive') S.medicT = Math.max(0, S.medicT - dt);
+  if (S.cleanT > 0 && S.phase !== 'drive') {   // nettoyage terminé : la voiture rouvre à la montée
+    S.cleanT = Math.max(0, S.cleanT - dt);
+    if (S.cleanT === 0 && !S.dirtyKeep) { msg(`V${S.dirtyCar + 1} nettoyée : la montée reprend`, '#7dff8a', 2.5); S.dirtyCar = -1; }
+  }
   const sd = scheduleDelta();
   if (sd !== null) S.schedShow += (sd - S.schedShow) * Math.min(1, dt * 4);
   // entrée à quai : le train est considéré comme arrivé, l'écart horaire est figé
@@ -2437,7 +2442,7 @@ function drawCCTV() {
     if (S.suspects.some(x => x.car === car)) {
       g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(SX + 90, SY + 1, 12, 9); drawSkull(SX + 96, SY + 9, 1);
     }
-    if (car === S.dirtyCar) { g.fillStyle = 'rgba(120,100,10,0.9)'; g.fillRect(SX + CAM_W / 2 - 30, SY + CAM_H - 12, 60, 10); txt(S.dirtyKeep ? 'SOUILLÉE' : 'NETTOYAGE', SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
+    if (car === S.dirtyCar) { g.fillStyle = 'rgba(120,100,10,0.9)'; g.fillRect(SX + CAM_W / 2 - 30, SY + CAM_H - 12, 60, 10); txt(S.dirtyKeep ? 'SOUILLÉE' : `NETTOYAGE ${Math.ceil(S.cleanT)} s`, SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
     else if (cf >= 1) { g.fillStyle = 'rgba(160,20,20,0.85)'; g.fillRect(SX + CAM_W / 2 - 22, SY + CAM_H - 12, 44, 10); txt('COMPLET', SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
     if (S.doors > 0 && S.alerted) for (const dz of [z0 + 4, z0 + 11]) {   // après la sonnerie seulement
       if (doorState(dz) !== 2) continue;
@@ -2678,7 +2683,7 @@ function drawCab() {
       g.fillStyle = '#1a1f24'; g.fillRect(bx, IY + 16, 9, 9);
       g.fillStyle = fill >= 1 ? '#ff4a3a' : fill > 0.85 ? '#ffb35e' : fill > 0.6 ? '#ffd75e' : '#7dff8a'; g.fillRect(bx, IY + 16 + 9 * (1 - fill), 9, 9 * fill);
     }
-    sans(full ? 'PLEINE' : `${Math.round(ratio * 100)} % · ${Math.max(0, CAP - S.load)} libres`, sx0 + sw - 4, IY + 23.5, 6, full ? '#ff8a7a' : OFF, 'right');
+    sans(full ? 'PLEINE' : `${Math.round(ratio * 100)} %`, sx0 + sw - 4, IY + 23.5, 6, full ? '#ff8a7a' : OFF, 'right');
   } else {
   if (S.missed > 0) sans(`arrêts ratés ${S.missed}/${MISS_MAX}`, sx0 + sw - 4, IY + 10, 5.5, S.missed >= MISS_MAX - 1 ? '#ff8a7a' : '#ffc27a', 'right');
   if (S.next < STATIONS.length) {
@@ -2940,16 +2945,6 @@ function drawTopCam() {
   g.fillStyle = 'rgba(255,215,94,0.18)'; g.fillRect(Math.round(X(st.pos - 3)), y0 + 22, Math.round(6 * ppm), 36);
   g.fillStyle = 'rgba(159,224,255,0.25)'; g.fillRect(Math.round(X(st.pos - 1.5)), y0 + 22, Math.round(3 * ppm), 36);
   g.fillStyle = 'rgba(125,255,138,0.5)'; g.fillRect(Math.round(X(st.pos - 0.5)), y0 + 22, Math.max(2, Math.round(1 * ppm)), 36);
-  // graduations le long du quai : tous les 10 cm en loupe, sinon tous les mètres
-  const stepG = span < 9 ? 0.1 : 1;
-  for (let q = Math.ceil((-span) / stepG); q * stepG <= span; q++) {
-    const pp = q * stepG, gx = X(st.pos + pp);
-    const major = Math.abs(pp - Math.round(pp)) < 1e-6, half = Math.abs(pp * 2 - Math.round(pp * 2)) < 1e-6;
-    const th = major ? 7 : half ? 4.5 : 2.5;
-    g.fillStyle = major ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)';
-    g.fillRect(gx - 0.25, y0 + 19 - th, 0.5, th);
-    if (major && pp !== 0 && span < 9) txt((pp > 0 ? '+' : '') + Math.round(pp), gx, y0 + 9, 8, '#ffffff', 'center');
-  }
   // marque d'arrêt
   g.fillStyle = '#ffffff'; g.fillRect(Math.round(markX) - 1, y0 + 4, 2, 54);
   g.fillStyle = '#d42a2a'; g.fillRect(Math.round(markX) - 9, y0 + 3, 18, 8);
@@ -3064,8 +3059,14 @@ function cabBackground(t) {
 }
 function drawCabCam() {
   const sk = S.cab; if (!sk || !sk.shown || S.phase !== 'drive') return;
-  const K = 1.3, pop = Math.min(1, sk.t * 5), w = Math.round(112 * K * pop), h = Math.round(72 * K * pop), x0 = 8, y0 = VIEW_H - 8 - Math.round(72 * K);
-  const ok = sk.called || (sk.type === 'slip' && sk.fallT <= 0), flash = Math.floor(S.t * 4) % 2;
+  // ouverture, puis fermeture une fois l'action faite (1,2 s pour lire la confirmation) ;
+  // sol glissant : visible 6 s, puis seulement au moment d'une chute
+  let pop = Math.min(1, sk.t * 5);
+  if (sk.called) pop = Math.min(pop, Math.max(0, 1 - (sk.t - sk.calledAt - 1.2) * 5));
+  else if (sk.type === 'slip' && sk.fallT <= 0) pop = Math.min(pop, Math.max(0, 1 - (sk.t - 6) * 5));
+  if (pop <= 0) return;
+  const K = 1.3, w = Math.round(112 * K * pop), h = Math.round(72 * K * pop), x0 = 8, y0 = VIEW_H - 8 - Math.round(72 * K);
+  const flash = Math.floor(S.t * 4) % 2;
   g.fillStyle = '#0d0f14'; g.fillRect(x0 - 3, y0 - 3, w + 6, h + 6);
   g.strokeStyle = sk.called ? '#3a6a44' : (flash ? '#ff4a3a' : '#7a1a14'); g.lineWidth = 1.5; g.strokeRect(x0 - 2.25, y0 - 2.25, w + 4.5, h + 4.5);
   if (pop < 1) return;
