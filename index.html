@@ -175,6 +175,12 @@ try { HELP_SKULL = localStorage.getItem('dm_skull') === '1'; } catch (e) {}
 const affLabel = a => a >= 2 ? ['très forte', '#ff6b5b'] : a >= 1.3 ? ['forte', '#ffb35e'] : a >= 0.8 ? ['moyenne', '#ffd75e'] : ['faible', '#7dff8a'];
 
 // trajet le plus rapide réaliste : pleine traction (1,1 m/s²), vitesse max, freinage franc (1,5 m/s²)
+// position le long du quai (0 = tête de rame, 75 = queue) tirée selon le poids de chaque voiture
+function platformZ(wts) {
+  const tot = wts.reduce((a, b) => a + b, 0); let r = Math.random() * tot, c = 0;
+  while (c < 4 && r >= wts[c]) { r -= wts[c]; c++; }
+  return Math.min(74, c * 15 + 0.5 + Math.random() * 14);
+}
 function legTime(d, a, b, vmax) {      // trajet le plus rapide : pleine traction, vitesse max, freinage franc
   const vp = Math.min(vmax, Math.sqrt(2 * d * a * b / (a + b)));
   return vp / a + vp / b + Math.max(0, d - vp * vp / (2 * a) - vp * vp / (2 * b)) / vp;
@@ -195,7 +201,11 @@ function buildLine() {
     s.people = [];
     s.crowd = false; s.acc = 0;
     const n = Math.round(s.aff * PERIODS[PER].affMul * L.aff * (17 + Math.random() * 8));
-    for (let k = 0; k < n; k++) s.people.push(mkPerson(p - 68 + Math.random() * 70, 2.4 + Math.random() * 3.2));
+    // dans 3 stations sur 4, la foule s'agglutine près d'un accès : une voiture bondée, une presque vide
+    s.hot = Math.random() < 0.75 ? Math.floor(Math.random() * 5) : -1;
+    const wts = [0, 1, 2, 3, 4].map(c => s.hot < 0 ? 1 : c === s.hot ? 6 : Math.abs(c - s.hot) === 1 ? 1.4 : Math.abs(c - s.hot) >= 3 ? 0.1 : 0.45);
+    s.wts = wts;
+    for (let k = 0; k < n; k++) s.people.push(mkPerson(p - platformZ(wts), 2.4 + Math.random() * 3.2));
   });
 }
 
@@ -300,6 +310,51 @@ function initAudio() {
     [hissGain] = loop('highpass', 3500, 0.5);
   } catch (e) { AC = null; }
 }
+// musique de l'écran d'accueil : boucle chiptune générée (basse qui roule, arpèges, batterie 8 bits)
+let MUS = null;
+function startMusic() {
+  if (!AC || MUS) return;
+  const out = AC.createGain(); out.gain.value = 0.0001; out.connect(AC.destination);
+  out.gain.setTargetAtTime(0.55, AC.currentTime, 0.4);
+  MUS = { out, step: 0, next: AC.currentTime + 0.12, timer: null };
+  const sx = 60 / 140 / 4;                                       // une double croche à 140 BPM
+  const f = n => 440 * Math.pow(2, (n - 69) / 12);
+  const PROG = [[45, 57, 60, 64], [41, 53, 57, 60], [48, 55, 60, 64], [43, 55, 59, 62]];   // la m · fa · do · sol
+  const MEL = [69, -1, 72, -1, 76, -1, 74, 72, 74, -1, 72, -1, 69, -1, -1, -1,
+               65, -1, 69, -1, 72, -1, 74, 72, 69, -1, 65, -1, 67, -1, 69, -1,
+               72, -1, 76, -1, 79, -1, 77, 76, 74, -1, 72, -1, 76, -1, -1, -1,
+               74, -1, 71, -1, 67, -1, 71, 74, 79, -1, 77, -1, 76, -1, 74, -1];
+  const tone = (fr, t, dur, type, vol, slide) => {
+    const o = AC.createOscillator(), gn = AC.createGain(); o.type = type; o.frequency.setValueAtTime(fr, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+    gn.gain.setValueAtTime(vol, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(gn).connect(out); o.start(t); o.stop(t + dur + 0.02);
+  };
+  const hiss = (t, dur, vol, fr, type) => {
+    if (!NOISE) { NOISE = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const d = NOISE.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    const src = AC.createBufferSource(); src.buffer = NOISE; const fl = AC.createBiquadFilter(); fl.type = type; fl.frequency.value = fr;
+    const gn = AC.createGain(); gn.gain.setValueAtTime(vol, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(fl).connect(gn).connect(out); src.start(t, Math.random()); src.stop(t + dur + 0.02);
+  };
+  const play = (i, t) => {
+    const s16 = i % 16, ch = PROG[Math.floor(i / 16) % 4];
+    if (s16 % 2 === 0) tone(f(ch[0] + (s16 % 4 === 2 ? 12 : 0)), t, sx * 1.7, 'triangle', 0.32);    // basse « roulement »
+    if (s16 % 2 === 0) tone(f(ch[0] - 12 + (s16 % 4 === 2 ? 12 : 0)), t, sx * 1.2, 'square', 0.035);
+    tone(f(ch[1 + s16 % 3] + 12), t, sx * 0.8, 'square', 0.018);                                       // arpège
+    if (MEL[i] > 0) tone(f(MEL[i]), t, sx * 1.9, 'square', 0.05);                                      // mélodie
+    if (s16 % 4 === 0) tone(150, t, 0.13, 'sine', 0.5, 40);                                            // grosse caisse
+    if (s16 === 4 || s16 === 12) hiss(t, 0.12, 0.18, 1800, 'bandpass');                                // caisse claire
+    if (s16 % 2 === 1) hiss(t, 0.035, 0.06, 7000, 'highpass');                                         // charleston
+  };
+  const tick = () => { if (!MUS) return; while (MUS.next < AC.currentTime + 0.15) { play(MUS.step, MUS.next); MUS.next += sx; MUS.step = (MUS.step + 1) % 64; } };
+  MUS.timer = setInterval(tick, 25); tick();
+}
+function stopMusic() {
+  if (!MUS) return;
+  const m = MUS; MUS = null;
+  m.out.gain.setTargetAtTime(0.0001, AC.currentTime, 0.15);
+  setTimeout(() => { clearInterval(m.timer); m.out.disconnect(); }, 700);
+}
 function beep(freq, dur, type = 'square', vol = 0.05, delay = 0) {
   if (!AC) return;
   const o = AC.createOscillator(), gn = AC.createGain();
@@ -397,7 +452,7 @@ function setupMirror(st) {
 // un voyageur arrive sur le quai par un accès (escalier avant, milieu ou arrière)
 function spawnArrival(st, extra) {
   if (!extra && S.mp.filter(m => m.st === 'walk').length >= 75) return;
-  const z = pick([-2, 37, 79]) + Math.random() * 2;
+  const z = st.wts && Math.random() < 0.7 ? platformZ(st.wts) : pick([-2, 37, 79]) + Math.random() * 2;
   const door = DOORS.reduce((a, b) => Math.abs(b - z) < Math.abs(a - z) ? b : a);
   S.mp.push(Object.assign(mkPerson(0, 0), { st: 'walk', door, z, x: 4.2 + Math.random() * 0.6, side: Math.random() < 0.5 ? -1 : 1,
     sp: 1.2 + Math.random() * 0.6, delay: 0, walk: 0, fresh: true }, extra || {}));
@@ -432,19 +487,29 @@ function doAnnonce(n) {
   if (S.annCd > 0) { msg(`Micro indisponible encore ${Math.ceil(S.annCd)} s`, '#8fa0b8', 1.5); return; }
   S.annCd = 10; chime();
   if (n === 1) {
-    msg('📢 « Avancez vers le milieu de la rame, merci ! »', '#9fe0ff', 3);
+    msg('📢 « Répartissez-vous sur toute la longueur du quai et avancez dans la rame ! »', '#9fe0ff', 3.5);
     let moved = 0;
     for (let k = 0; k < 12; k++) {     // à bord : on se répartit
       const mx = S.cars.indexOf(Math.max(...S.cars)), mn = S.cars.indexOf(Math.min(...S.cars));
       if (S.cars[mx] - S.cars[mn] <= 3) break;
       S.cars[mx]--; S.cars[mn]++; moved++;
     }
-    S.mp.forEach(m => {               // sur le quai : on vise les voitures les moins chargées
-      if (m.st !== 'walk' || m.halt) return;
-      const best = DOORS.filter(dz => Math.abs(dz - m.z) < 25).sort((a, b) => (S.cars[carOf(a)] - S.cars[carOf(b)]) || (Math.abs(a - m.z) - Math.abs(b - m.z)))[0];
-      if (best !== undefined) m.door = best;
-    });
-    if (moved >= 4) { S.score += 10; msg(`Les voyageurs se répartissent dans la rame (+10)`, '#7dff8a', 2.5); }
+    // sur le quai : chacun vise la porte la moins encombrée (file d'attente + remplissage de la voiture), jusqu'à 40 m
+    const q = {}; DOORS.forEach(dz => q[dz] = 0);
+    const walkers = S.alerted ? [] : S.mp.filter(m => m.st === 'walk');
+    walkers.sort(() => Math.random() - 0.5);
+    let spread = 0;
+    for (const m of walkers) {
+      let best = m.door, bs = 1e9;
+      for (const dz of DOORS) {
+        if (Math.abs(dz - m.z) > 40 || S.cars[carOf(dz)] >= CAR_CAP) continue;
+        const sc = q[dz] + S.cars[carOf(dz)] / 8 + Math.abs(dz - m.z) / 14;
+        if (sc < bs) { bs = sc; best = dz; }
+      }
+      if (best !== m.door) spread++;
+      m.door = best; m.halt = false; m.spread = true; q[best]++;
+    }
+    if (moved + spread >= 4) { S.score += 10; msg(`Les voyageurs se répartissent le long de la rame (+10)`, '#7dff8a', 2.5); }
   } else if (n === 2) {
     msg('📢 « Ne retenez pas les portes, un train suit ! »', '#9fe0ff', 3);
     const h = S.mp.filter(m => m.holder && m.st === 'door');
@@ -513,6 +578,7 @@ function pop(dz, text, col) {
   S.pops.push({ x: sx + (dz - car * 15 - CAM_CROP) * 112 / 15 * CAM_K, y: sy + 30 * CAM_K, text, col, t: 0 });
 }
 const doorBusyOut = dz => S.mp.some(o => o.door === dz && o.st === 'out');
+const doorBusyIn = dz => S.mp.some(o => o.door === dz && o.st === 'door');
 function moveTo(m, tz, tx, dt) {
   const dz = tz - m.z, dx = tx - m.x, dd = Math.hypot(dz, dx), step = m.sp * (m.slow || 1) * dt;
   if (Math.abs(dz) > 0.02) m.dir = Math.sign(dz);
@@ -528,7 +594,7 @@ function updateMirror(dt) {
       if (S.cars[carOf(m.door)] >= CAR_CAP || carOf(m.door) === S.dirtyCar) {
         // voiture bondée (ou souillée) : on cherche une porte d'une autre voiture
         const alt = DOORS.filter(dz => S.cars[carOf(dz)] < CAR_CAP && carOf(dz) !== S.dirtyCar).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
-        if (alt !== undefined && Math.abs(alt - m.z) < 25) m.door = alt;
+        if (alt !== undefined && Math.abs(alt - m.z) < (m.spread ? 40 : 8)) m.door = alt;
         else {
           m.halt = true;
           if (S.load >= CAP && !S.fullWarn) { S.fullWarn = true; msg('Rame pleine ! Plus personne ne peut monter', '#ff6b5b', 3); }
@@ -537,9 +603,9 @@ function updateMirror(dt) {
         }
       }
       m.halt = false;
-      if (doorBusyOut(m.door) && !m.runner) {
-        // on laisse descendre : attente à côté de la porte
-        moveTo(m, m.door + m.side * 1.1, 0.7, dt);
+      if ((doorBusyOut(m.door) || doorBusyIn(m.door)) && !m.runner) {
+        // on laisse descendre, ou on attend son tour : une personne à la fois dans l'encadrement
+        moveTo(m, m.door + m.side * (1.0 + (hsh(m.seed * 1000 | 0, 7) * 1.6)), 0.6 + hsh(m.seed * 1000 | 0, 8) * 1.4, dt);
       } else if (moveTo(m, m.door, 0.25, dt)) {
         m.st = 'door'; m.t = 0.45;
         if (S.holderPending && !m.suspect) { S.holderPending = false; m.holder = true; m.t = 25; }   // fêtard qui retient la porte
@@ -587,16 +653,13 @@ addEventListener('keydown', e => {
   keys[k] = true;
   initAudio(); if (AC && AC.state === 'suspended') AC.resume();
   if (S.mode === 'title') {
+    if (TITLE.stage === 0) { if (!e.repeat) titleGo(); return; }    // intro : n'importe quelle touche
     if (k === 'arrowleft' || k === 'arrowright' || ['1', '2', '3', '4'].includes(k)) {
       const nL = LINES.length;
       LINE = k === 'arrowleft' ? (LINE + nL - 1) % nL : k === 'arrowright' ? (LINE + 1) % nL : +k - 1;
       saveBest(); reset('title'); beep(660, 0.06, 'square', 0.04);
     }
-    if (k === 'enter' || k === 't') {
-      S.mode = 'running'; S.pos = 0; S.v = 0; msg(`Ligne ${LN().num} · ${STATIONS[0].name} — en voiture !`, '#ffd75e');
-      let seen = false; try { seen = localStorage.getItem('dm_tuto') === '1'; } catch (err) {}
-      if (k === 't' || !seen) { S.tuto = 0; S.tutoT = 0; }
-    }
+    if (k === 'enter' || k === 't') startService(k === 't');
     return;
   }
   if (S.mode === 'end') { if (k === 'enter' || k === 'r') reset('running'); return; }
@@ -637,7 +700,17 @@ addEventListener('keydown', e => {
   }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-cv.addEventListener('click', () => { cv.focus(); initAudio(); if (S.mode === 'title') S.mode = 'running'; });
+cv.addEventListener('click', () => {
+  cv.focus(); initAudio(); if (AC && AC.state === 'suspended') AC.resume();
+  if (S.mode === 'title') { if (TITLE.stage === 0) titleGo(); else startService(false); }
+});
+function startService(tuto) {
+  stopMusic();
+  S.mode = 'running'; S.pos = 0; S.v = 0; msg(`Ligne ${LN().num} · ${STATIONS[0].name} — en voiture !`, '#ffd75e');
+  let seen = false; try { seen = localStorage.getItem('dm_tuto') === '1'; } catch (err) {}
+  if (tuto || !seen) { S.tuto = 0; S.tutoT = 0; }
+  beep(523, 0.08, 'square', 0.05); beep(784, 0.14, 'square', 0.05, 0.08);
+}
 const keyTraction = () => keys['z'] || keys['w'] || keys['arrowup'];
 const keyBrake = () => keys['s'] || keys['arrowdown'];
 
@@ -938,6 +1011,15 @@ function drawDwellBar() {
     txt(l, 96, 11, 12, c, 'left', 'VT323', room);
   } else txt('Terminus : tout le monde descend', 96, 11, 12, '#cfd6e6', 'left', 'VT323', room);
 }
+// voyageurs qui attendent sur le quai, voiture par voiture
+function quaiCrowd() {
+  const n = [0, 0, 0, 0, 0];
+  S.mp.forEach(m => { if (m.st === 'walk') n[carOf(m.door)]++; });
+  const free = [0, 1, 2, 3, 4].filter(c => S.cars[c] < CAR_CAP && c !== S.dirtyCar);
+  const max = Math.max(...n), hi = n.indexOf(max);
+  const lo = free.length ? free.reduce((a, b) => n[b] < n[a] ? b : a) : 0;
+  return { n, max, hi, min: n[lo], lo };
+}
 function drawHint() {
   if (S.mode !== 'running' || S.tuto >= 0) return;
   let hint = '';
@@ -946,6 +1028,9 @@ function drawHint() {
   else if (S.annonce) hint = 'ANNONCE : tapez 1 ou 2 — Échap pour annuler';
   else if (hold && S.holdT > 2.5) hint = `Quelqu'un retient la porte en V${carOf(hold.door) + 1} ! A : appel radio`;
   else if ((S.phase === 'dwell' || S.phase === 'alert') && S.alerted && blocked()) hint = `PORTE OCCUPÉE en V${carOf(busyDoor()) + 1} : attendez le cadre vert avant de fermer (⏎)`;
+  else if (S.phase === 'dwell' && !S.alerted && S.annCd <= 0 && (() => { const c = quaiCrowd(); return c.max >= 10 && c.max >= 3 * c.min + 6; })()) {
+    const c = quaiCrowd(); hint = `QUAI MAL RÉPARTI : foule en V${c.hi + 1}, V${c.lo + 1} presque vide — V puis 1 : « Répartissez-vous »`;
+  }
   else if (S.alarm) hint = 'ALARME : arrêtez le train 3 secondes';
   else if (S.medicT > 0) hint = `${S.medicKind === 'bag' ? 'INSPECTION DU BAGAGE' : 'SECOURS EN INTERVENTION'} en V${S.medicCar + 1} : portes ouvertes encore ${Math.ceil(S.medicT)} s`;
   else if (S.dog && S.dog.seen && ['sit', 'trot', 'run'].includes(S.dog.state)) hint = `CHIEN SUR LA VOIE à ${Math.max(0, Math.round(S.dog.pos - S.pos))} m : ralentissez et klaxonnez (K), ou arrêtez-vous`;
@@ -1197,7 +1282,12 @@ function update(dt) {
   }
   S.t += dt;
   S.msgs.forEach(m => m.t += dt); S.msgs = S.msgs.filter(m => m.t < m.life);
-  if (S.mode === 'title') { S.pos = (S.pos + 9 * dt) % 1080; S.v = 9; }
+  if (S.mode === 'title') {
+    TITLE.t += dt; TITLE.sel += (LINE - TITLE.sel) * Math.min(1, dt * 12);
+    const still = TITLE.stage === 0 && TITLE.t < INTRO_HIT;          // pendant l'arrivée de la rame, la caméra ne bouge pas
+    S.pos = still ? S.pos : (S.pos + 9 * dt) % 1080; S.v = still ? 0 : 9;
+    if (TITLE.stage === 1 && AC && !MUS) startMusic();
+  }
   if (S.mode !== 'running') { if (AC) { [motorGain, squealGain, rumbleGain, hissGain, whineGain].forEach(gn => gn.gain.setTargetAtTime(0, AC.currentTime, 0.1)); crowdGain.gain.setTargetAtTime(S.mode === 'title' ? 0.015 : 0, AC.currentTime, 0.5); } return; }
   S.clock += dt;
   // les quais se remplissent en continu tant que la rame n'est pas passée
@@ -3038,7 +3128,7 @@ function drawAnnonce() {
   g.fillStyle = 'rgba(8,10,20,0.94)'; g.fillRect(x, y, w, h);
   g.strokeStyle = '#9fe0ff'; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   txt('📢 ANNONCE VOYAGEURS', x + w / 2, y + 12, 13, '#9fe0ff', 'center');
-  txt('1  « Avancez vers le milieu de la rame »', x + 10, y + 27, 12, '#e6ecf5', 'left', 'VT323', w - 20);
+  txt('1  « Répartissez-vous sur tout le quai »', x + 10, y + 27, 12, '#e6ecf5', 'left', 'VT323', w - 20);
   txt('2  « Ne retenez pas les portes »', x + 10, y + 41, 12, '#e6ecf5', 'left', 'VT323', w - 20);
   if (S.annCd > 0) txt(`dispo dans ${Math.ceil(S.annCd)} s`, x + w - 8, y + 12, 10, '#8fa0b8', 'right');
 }
@@ -3314,44 +3404,175 @@ function keycap(x, y, label, w = 12) {
   g.fillStyle = '#9aa1ae'; g.fillRect(x, y + 10, w, 2);
   txt(label, x + w / 2, y + 9, 11, '#111', 'center');
 }
+// ===== écran d'accueil : intro (la rame arrive dans le tunnel), logo, puis choix de la ligne =====
+const TITLE = { stage: 0, t: 0, sel: LINE, best: [] };
+const INTRO_HIT = 3.2;                   // instant où la rame passe et où le logo s'abat
+function titleGo() {
+  TITLE.stage = 1; TITLE.t = 0; TITLE.sel = LINE;
+  TITLE.best = LINES.map(Ln => { try { return +localStorage.getItem('dm_best_' + Ln.id) || 0; } catch (e) { return 0; } });
+  noise(0.6, 0.25, 'bandpass', 900, 0.8, 0, 0.05); beep(392, 0.08, 'square', 0.05); beep(587, 0.12, 'square', 0.05, 0.07);
+  startMusic();
+}
+function titleShake() {
+  if (S.mode !== 'title' || TITLE.stage !== 0) return 0;
+  const k = TITLE.t - INTRO_HIT; return k > 0 && k < 0.45 ? 6 * (1 - k / 0.45) : 0;
+}
+// face avant de la rame à la distance d (m)
+function drawTrainFront(d) {
+  const lit = Math.max(0, Math.min(1, (260 - d) / 200));
+  const [lx, ty] = P(-1.5, 1.7, d), [rx, by] = P(1.5, -1.95, d), w = rx - lx, hh = by - ty;
+  const Y = y => P(0, y, d)[1], X = x => P(x, 0, d)[0];
+  if (w > 6) {
+    g.globalAlpha = lit;
+    g.fillStyle = '#c9ced6'; g.beginPath(); g.moveTo(lx + w * 0.06, ty); g.lineTo(rx - w * 0.06, ty); g.lineTo(rx, ty + hh * 0.12); g.lineTo(rx, by); g.lineTo(lx, by); g.lineTo(lx, ty + hh * 0.12); g.fill();
+    g.fillStyle = '#2a2e36'; g.fillRect(lx, Y(-1.55), w, by - Y(-1.55));
+    g.fillStyle = '#1f5fae'; g.fillRect(lx, Y(-1.15), w, Y(-1.5) - Y(-1.15));
+    g.fillStyle = LN().col; g.fillRect(lx, Y(-1.05), w, Math.max(1, Y(-1.15) - Y(-1.05)));
+    g.fillStyle = '#0c1018'; g.fillRect(X(-1.32), Y(1.25), X(1.32) - X(-1.32), Y(0.15) - Y(1.25));
+    g.fillStyle = '#c9ced6'; g.fillRect(X(-0.05), Y(1.25), Math.max(1, X(0.05) - X(-0.05)), Y(0.15) - Y(1.25));
+    g.fillStyle = 'rgba(160,190,230,0.12)'; g.beginPath(); g.moveTo(X(-1.2), Y(1.25)); g.lineTo(X(-0.6), Y(1.25)); g.lineTo(X(-1.0), Y(0.15)); g.lineTo(X(-1.32), Y(0.15)); g.fill();
+    g.fillStyle = '#120c04'; g.fillRect(X(-0.9), Y(1.6), X(0.9) - X(-0.9), Y(1.33) - Y(1.6));   // girouette
+    if (w > 110) txt('DERNIER MÉTRO', W / 2 + (X(0) - W / 2), Y(1.36), Math.min(30, (Y(1.33) - Y(1.6)) * 0.95), '#ffb547', 'center', 'VT323', X(0.85) - X(-0.85));
+    g.fillStyle = '#4a4e57'; g.fillRect(X(-0.3), Y(-1.6), X(0.3) - X(-0.3), Y(-1.95) - Y(-1.6));   // attelage
+    g.globalAlpha = 1;
+  }
+  // phares : visibles de très loin
+  for (const sx of [-1.05, 1.05]) {
+    const [hx, hy] = P(sx, -0.75, d), r = Math.max(0.8, 0.14 * F / d);
+    glow(hx, hy, Math.min(48, r * 9 + 4), '255,236,190', 0.45); glow(hx, hy, Math.min(14, r * 3), '255,250,235', 0.8);
+    g.fillStyle = '#fffdf2'; g.beginPath(); g.arc(hx, hy, r, 0, 7); g.fill();
+  }
+}
+// logo : « DERNIER » + « MÉTRO » en relief, contour noir, halo de néon qui grésille
+function drawLogo(cx, cy, sc, neon) {
+  const big = Math.round(34 * sc), small = Math.max(6, Math.round(11 * sc));
+  g.textAlign = 'center'; g.lineJoin = 'round';
+  g.font = `${small}px "Press Start 2P", monospace`;
+  const dy = cy - big * 1.35 - 4 * sc;
+  g.lineWidth = Math.max(2, 3 * sc); g.strokeStyle = '#000'; g.strokeText('DERNIER', cx, dy);
+  g.fillStyle = '#e6ecf5'; g.fillText('DERNIER', cx, dy);
+  g.font = `${big}px "Press Start 2P", monospace`;
+  const word = 'METRO', tw = g.measureText(word).width, x0 = cx - tw / 2, mW = g.measureText('M').width, eW = g.measureText('E').width;
+  g.textAlign = 'left';
+  for (let k = Math.round(5 * sc); k >= 1; k--) { g.fillStyle = k > 2 * sc ? '#3a1404' : '#7a2a0c'; g.fillText(word, x0 + k, cy + k); }   // extrusion
+  g.lineWidth = Math.max(2, 4 * sc); g.strokeStyle = '#000'; g.strokeText(word, x0, cy);
+  const gr = g.createLinearGradient(0, cy - big, 0, cy); gr.addColorStop(0, '#fff6c2'); gr.addColorStop(0.45, '#ffd75e'); gr.addColorStop(1, '#ff8a2a');
+  if (neon > 0) { g.shadowColor = '#ffb547'; g.shadowBlur = 14 * neon * RES; }
+  g.fillStyle = gr; g.fillText(word, x0, cy); g.shadowBlur = 0;
+  // accent du É
+  const ax = x0 + mW + eW * 0.42, ay = cy - big * 1.22, aw = Math.max(3, big * 0.28), ah = Math.max(2, big * 0.16);
+  const acc = (o, c) => { g.fillStyle = c; g.beginPath(); g.moveTo(ax - o, ay + ah + o); g.lineTo(ax + aw * 0.6 - o, ay - o); g.lineTo(ax + aw * 1.25 + o, ay - o); g.lineTo(ax + aw * 0.65 + o, ay + ah + o); g.fill(); };
+  acc(1.2, '#000'); acc(0, '#fff6c2');
+  // tube de néon sous le mot, à la couleur de la ligne
+  const ny = cy + big * 0.32 + 2, col = LN().col, rgb = [1, 3, 5].map(i => parseInt(col.slice(i, i + 2), 16)).join(',');
+  if (neon > 0) glow(cx, ny, tw * 0.55, rgb, 0.18 * neon);
+  g.fillStyle = neon > 0.5 ? col : '#2a2e36'; g.fillRect(x0 + 4, ny, tw - 8, Math.max(1.5, 2 * sc));
+  g.textAlign = 'left';
+}
+// texte en police pixel avec É : la police n'a pas la majuscule accentuée, on dessine l'accent
+function pixText(str, x, y, size, col, shadow = '#000') {
+  g.font = `${size}px "Press Start 2P", monospace`; g.textAlign = 'left';
+  const plain = str.replace(/É/g, 'E'), tw = g.measureText(plain).width, x0 = x - tw / 2;
+  const draw = (dx, dy, c) => {
+    g.fillStyle = c; g.fillText(plain, x0 + dx, y + dy);
+    for (let i = 0; i < str.length; i++) if (str[i] === 'É') {
+      const ex = x0 + dx + g.measureText(plain.slice(0, i)).width + size * 0.35, ey = y + dy - size * 1.25;
+      g.beginPath(); g.moveTo(ex, ey + size * 0.22); g.lineTo(ex + size * 0.22, ey); g.lineTo(ex + size * 0.42, ey); g.lineTo(ex + size * 0.2, ey + size * 0.22); g.fill();
+    }
+  };
+  if (shadow) draw(1, 1, shadow);
+  draw(0, 0, col);
+}
+function neonFlicker(t) {    // grésillement à l'allumage, puis quelques ratés de temps en temps
+  if (t < 0) return 0;
+  if (t < 1.1) return [1, 0, 1, 0.2, 0, 1, 1, 0, 0.6, 1, 0, 1, 1, 1, 0.3, 1][Math.floor(t * 14) % 16];
+  return hsh(Math.floor(t * 9), 91) < 0.04 ? 0.25 : 1;
+}
 function drawTitle() {
-  // assombrissement en dégradé (le tunnel défile derrière)
+  const t = TITLE.t;
+  if (TITLE.stage === 0) {
+    // 1. intro : noir du tunnel, deux phares au loin qui grossissent, la rame passe plein écran
+    g.fillStyle = `rgba(2,3,8,${t < INTRO_HIT ? 0.8 : 0.74})`; g.fillRect(0, 0, W, H);
+    if (t < INTRO_HIT) {
+      const k = t / INTRO_HIT, d = 0.9 + 600 * Math.pow(1 - k, 3);
+      const [vx, vy] = P(0, -0.75, d);
+      glow(vx, vy, 30 + 200 * k * k, '255,226,170', 0.06 + 0.16 * k * k);       // la lumière envahit le tunnel
+      drawTrainFront(d);
+      if (k > 0.8) for (let i = 0; i < 26; i++) {                                // étincelles sur les rails
+        const side = i % 2 ? 1 : -1, [sx, sy] = P(side * 0.72, -1.98, Math.max(1, d)), q = hsh(i + Math.floor(t * 30) * 7, 5);
+        g.fillStyle = q > 0.5 ? '#ffe9a0' : '#ff9a3a';
+        g.fillRect(sx + side * q * 28 * k, sy - hsh(i, 6) * 16 * k, 1.5, 1.5);
+      }
+    } else {
+      const k = t - INTRO_HIT;
+      if (k < 0.5) { g.fillStyle = `rgba(255,250,235,${1 - k / 0.5})`; g.fillRect(0, 0, W, H); }   // éclair blanc
+      const slam = Math.max(0, 1 - k / 0.2), sc = 1 + 2.4 * slam * slam;
+      g.globalAlpha = Math.min(1, k / 0.08);
+      drawLogo(W / 2, 92, sc, neonFlicker(k - 0.25));
+      g.globalAlpha = 1;
+      if (k > 0.9) {
+        txt('Prenez les commandes de la dernière rame de la nuit', W / 2, 122, 11, '#a8b2c6', 'center', 'VT323', W - 40);
+        if (Math.floor(t * 1.8) % 2 === 0) {
+          pixText('APPUYEZ SUR ENTRÉE', W / 2, 157, 9, '#ffffff');
+        }
+        txt('ou cliquez', W / 2, 172, 10, '#6f7a90', 'center');
+      }
+    }
+    return;
+  }
+  // 2. choix de la ligne : cartes façon sélection de niveau
   const gr = g.createLinearGradient(0, 0, 0, H);
-  gr.addColorStop(0, 'rgba(4,6,12,0.92)'); gr.addColorStop(0.35, 'rgba(4,6,12,0.55)'); gr.addColorStop(0.6, 'rgba(4,6,12,0.7)'); gr.addColorStop(1, 'rgba(4,6,12,0.97)');
+  gr.addColorStop(0, 'rgba(4,6,12,0.9)'); gr.addColorStop(0.4, 'rgba(4,6,12,0.55)'); gr.addColorStop(1, 'rgba(4,6,12,0.96)');
   g.fillStyle = gr; g.fillRect(0, 0, W, H);
-  // logo
-  const bob = Math.round(Math.sin(S.t * 2) * 1);
-  g.fillStyle = '#ffcd00'; g.beginPath(); g.arc(46, 24 + bob, 12, 0, 7); g.fill();
-  txt('M', 46, 31 + bob, 16, '#111', 'center', '"Press Start 2P"');
-  g.font = '18px "Press Start 2P", monospace'; g.textAlign = 'left';
-  const title = 'DERNIER METRO', tx = 66, ty = 33 + bob;
-  g.fillStyle = '#000'; g.fillText(title, tx + 2, ty + 2);
-  g.fillStyle = '#ffd75e'; g.fillText(title, tx, ty);
-  const eX = tx + g.measureText('DERNIER M').width, eW = g.measureText('E').width;   // accent du É
-  g.fillStyle = '#000'; g.fillRect(eX + eW * 0.45 + 2, ty - 21 + 2, 5, 3);
-  g.fillStyle = '#ffd75e'; g.fillRect(eX + eW * 0.45, ty - 21, 5, 3);
-  txt('Transportez un maximum de voyageurs, à l\'heure, en vous arrêtant pile sur la marque.', W / 2 + 14, 48, 11, '#e6ecf5', 'center', 'VT323', 320);
-  // cartes de ligne : numéro, nom, difficulté — rien d'autre
-  LINES.forEach((Ln, i) => {
-    const w = 86, h = 32, x = 10 + i * 92, y = 66, sel = i === LINE;
-    if (sel) { g.fillStyle = Ln.col; g.fillRect(x - 2, y - 2, w + 4, h + 4); }
-    g.fillStyle = sel ? '#1d2a4f' : 'rgba(29,42,79,0.45)'; g.fillRect(x, y, w, h);
-    g.fillStyle = Ln.col; g.beginPath(); g.arc(x + 15, y + h / 2, 9, 0, 7); g.fill();
-    txt(Ln.num, x + 15 + (Ln.num.length > 1 ? 0.5 : 0), y + h / 2 + (Ln.num.length > 1 ? 3 : 4.5), Ln.num.length > 1 ? 7 : 12, Ln.fg, 'center', '"Press Start 2P"');
-    txt('LIGNE ' + Ln.num, x + 29, y + 14, 12, sel ? '#ffffff' : '#a8b2c6');
-    txt(Ln.diff, x + 29, y + 25, 10, sel ? Ln.dcol : '#6f7a90');
-  });
-  // une seule ligne d'information sur la ligne choisie
-  const L0 = LN();
-  txt(`${L0.st[0][0]} → ${L0.st[L0.st.length - 1][0]}${BEST ? '   ·   record ' + BEST : ''}`, W / 2, 114, 11, '#cfd6e6', 'center', 'VT323', W - 30);
-  txt('◄  ►  choisir la ligne', W / 2, 126, 10, '#6f7a90', 'center');
-  // bouton démarrer
-  const pulse = 0.5 + 0.5 * Math.sin(S.t * 4);
-  g.font = '8px "Press Start 2P", monospace'; const bw = Math.ceil(g.measureText('ENTREE : PRENDRE LE SERVICE').width) + 20;
-  g.fillStyle = `rgba(255,215,94,${0.15 + 0.2 * pulse})`; g.fillRect(W / 2 - bw / 2, 152, bw, 18);
-  g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.strokeRect(W / 2 - bw / 2 + 0.5, 152.5, bw - 1, 17);
-  txt('ENTREE : PRENDRE LE SERVICE', W / 2, 165, 8, '#ffffff', 'center', '"Press Start 2P"');
-  txt('?  aide      T  tutoriel      F  plein écran', W / 2, 206, 10, '#6f7a90', 'center');
+  if (t < 0.35) { g.fillStyle = `rgba(255,250,235,${0.5 * (1 - t / 0.35)})`; g.fillRect(0, 0, W, H); }
+  drawLogo(W / 2, 40, 0.55, neonFlicker(t + 2));
+  const intro = 1 - Math.pow(1 - Math.min(1, t / 0.45), 3), oy = (1 - intro) * 90;
+  const order = LINES.map((_, i) => i).sort((a, b) => Math.abs(b - TITLE.sel) - Math.abs(a - TITLE.sel));
+  for (const i of order) {
+    const Ln = LINES[i], rel = i - TITLE.sel, ar = Math.min(1.4, Math.abs(rel));
+    const sc = 1 - Math.min(1, ar) * 0.3, cw = 132 * sc, ch = 96 * sc;
+    const x = W / 2 + rel * 128 - cw / 2, y = 102 - ch / 2 + oy, sel = Math.abs(rel) < 0.5;
+    g.globalAlpha = 1 - Math.min(1, ar) * 0.5;
+    if (sel) { const rgb = [1, 3, 5].map(k => parseInt(Ln.col.slice(k, k + 2), 16)).join(','); glow(x + cw / 2, y + ch / 2, cw * 0.8, rgb, 0.22 + 0.08 * Math.sin(S.t * 4)); }
+    g.fillStyle = '#000'; g.fillRect(x + 3, y + 3, cw, ch);
+    g.fillStyle = '#121826'; g.fillRect(x, y, cw, ch);
+    g.fillStyle = Ln.col; g.fillRect(x, y, cw, 22 * sc);
+    g.strokeStyle = sel ? Ln.col : '#3a4256'; g.lineWidth = sel ? 2 : 1; g.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+    // pastille et nom
+    const rx = x + 16 * sc, ry = y + 11 * sc;
+    g.fillStyle = '#0d0f14'; g.beginPath(); g.arc(rx, ry, 9 * sc, 0, 7); g.fill();
+    g.fillStyle = Ln.col; g.beginPath(); g.arc(rx, ry, 7.5 * sc, 0, 7); g.fill();
+    txt(Ln.num, rx + (Ln.num.length > 1 ? 0.5 : 0), ry + (Ln.num.length > 1 ? 3 : 4) * sc, Math.round((Ln.num.length > 1 ? 7 : 10) * sc), Ln.fg, 'center', '"Press Start 2P"');
+    g.font = `${Math.round(9 * sc)}px "Press Start 2P", monospace`; g.textAlign = 'left'; g.fillStyle = Ln.fg;
+    g.fillText('LIGNE ' + Ln.num, x + 30 * sc, y + 15 * sc);
+    // difficulté en étoiles
+    const sy = y + 36 * sc;
+    txt(Ln.diff, x + 8 * sc, sy, Math.round(12 * sc), Ln.dcol, 'left', 'VT323');
+    for (let k = 0; k < 4; k++) txt('★', x + cw - 10 * sc - (3 - k) * 11 * sc, sy, Math.round(12 * sc), k <= i ? Ln.dcol : '#2e3446', 'center');
+    if (sel) {
+      txt(`${Ln.st[0][0]}  →  ${Ln.st[Ln.st.length - 1][0]}`, x + cw / 2, y + 52, 10, '#cfd6e6', 'center', 'VT323', cw - 12);
+      txt(Ln.desc, x + cw / 2, y + 63, 10, '#8a94a8', 'center', 'VT323', cw - 12);
+      const best = TITLE.best[i] || 0, med = medalOf(best);
+      g.fillStyle = 'rgba(255,255,255,0.06)'; g.fillRect(x + 6, y + ch - 22, cw - 12, 16);
+      txt(best ? `RECORD ${best}` : 'PAS ENCORE DE RECORD', x + 12, y + ch - 10, 11, best ? '#ffffff' : '#6f7a90', 'left', 'VT323');
+      if (med) { g.fillStyle = med[2]; g.beginPath(); g.arc(x + cw - 16, y + ch - 14, 5, 0, 7); g.fill(); txt(med[1], x + cw - 24, y + ch - 10, 10, med[2], 'right', 'VT323'); }
+    }
+    g.globalAlpha = 1;
+  }
+  // flèches qui battent de part et d'autre de la carte choisie
+  const ab = Math.sin(S.t * 6) * 2;
+  g.font = '10px "Press Start 2P", monospace'; g.textAlign = 'center'; g.fillStyle = '#ffd75e';
+  if (LINE > 0) g.fillText('◄', W / 2 - 74 + ab, 106 + oy);
+  if (LINE < LINES.length - 1) g.fillText('►', W / 2 + 74 - ab, 106 + oy);
+  g.textAlign = 'left';
+  // bouton
+  const pulse = 0.5 + 0.5 * Math.sin(S.t * 5);
+  g.font = '8px "Press Start 2P", monospace'; const lab = 'ENTRÉE : PRENDRE LE SERVICE', bw = Math.ceil(g.measureText(lab.replace('É', 'E')).width) + 22;
+  g.fillStyle = `rgba(255,215,94,${0.14 + 0.22 * pulse})`; g.fillRect(W / 2 - bw / 2, 160, bw, 18);
+  g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.strokeRect(W / 2 - bw / 2 + 0.5, 160.5, bw - 1, 17);
+  pixText(lab, W / 2, 173, 8, '#ffffff', null);
+  txt('Un maximum de voyageurs, à l\'heure, arrêt pile sur la marque', W / 2, 192, 10, '#a8b2c6', 'center', 'VT323', W - 30);
+  txt('◄ ►  ligne      T  tutoriel      ?  aide      F  plein écran', W / 2, 207, 10, '#6f7a90', 'center');
 }
 
 function drawEnd() {
@@ -3410,7 +3631,12 @@ function drawEnd() {
 
 function render() {
   g.setTransform(RES, 0, 0, RES, 0, 0);
-  if (S.mode === 'title') { drawScene(); drawTitle(); if (S.help) drawHelp(); return; }
+  if (S.mode === 'title') {
+    const sh = titleShake();
+    if (sh) { g.fillStyle = '#000'; g.fillRect(0, 0, W, H); g.translate(sh * (hsh(Math.floor(S.t * 60), 3) - 0.5), sh * (hsh(Math.floor(S.t * 60), 4) - 0.5)); }
+    g.fillStyle = '#04060c'; g.fillRect(-8, VIEW_H - 1, W + 16, H - VIEW_H + 9);   // pas de pupitre à l'accueil
+    drawScene(); drawTitle(); if (S.help) drawHelp(); return;
+  }
   drawScene();
   drawGauge();
   drawCab();
