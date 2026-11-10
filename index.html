@@ -1609,42 +1609,88 @@ const ADS = [
   { bg: ['#f2efe6', '#ffffff'], title: 'Vélos & Co', sub: 'Location à la journée', col: '#1d3c8f', art: 'bike' },
   { bg: ['#1a1a1a', '#3a3a3a'], title: 'Parfum ÉCLAT', sub: 'L\'élégance à la parisienne', col: '#e8d5a0', art: 'bottle' },
 ];
-function adArt(art, x, y, s, col) {          // illustration simple, en coordonnées d'affiche
-  g.save(); g.translate(x, y); g.scale(s, s); g.lineCap = 'round';
-  const st = (c, w) => { g.strokeStyle = c; g.lineWidth = w; };
-  if (art === 'sax') { st(col, 7); g.beginPath(); g.moveTo(10, -30); g.lineTo(10, 15); g.quadraticCurveTo(10, 32, -6, 30); g.quadraticCurveTo(-18, 28, -16, 14); g.stroke(); g.fillStyle = '#fff'; for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(10, -20 + i * 9, 2.2, 0, 7); g.fill(); } }
-  else if (art === 'cup') { g.fillStyle = '#fff'; g.fillRect(-16, -6, 26, 26); st('#fff', 4); g.beginPath(); g.arc(13, 6, 7, -1.5, 1.5); g.stroke(); st('rgba(255,255,255,0.6)', 2.5); for (const dx of [-10, -2, 6]) { g.beginPath(); g.moveTo(dx, -10); g.quadraticCurveTo(dx + 5, -18, dx, -26); g.stroke(); } g.fillStyle = '#6b4226'; g.fillRect(-14, -4, 22, 5); }
-  else if (art === 'loco') { g.fillStyle = '#1a1a1a'; g.fillRect(-26, -8, 40, 22); g.fillRect(4, -22, 12, 16); g.fillRect(-20, -18, 6, 10); g.fillStyle = '#c0392b'; g.fillRect(-26, 10, 44, 4); g.fillStyle = '#333'; for (const dx of [-18, -4, 10]) { g.beginPath(); g.arc(dx, 18, 6, 0, 7); g.fill(); } g.fillStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); g.arc(-17, -26, 6, 0, 7); g.arc(-10, -32, 8, 0, 7); g.fill(); }
-  else if (art === 'bike') { st(col, 3.5); for (const dx of [-16, 16]) { g.beginPath(); g.arc(dx, 12, 11, 0, 7); g.stroke(); } g.beginPath(); g.moveTo(-16, 12); g.lineTo(-2, -8); g.lineTo(14, -8); g.lineTo(16, 12); g.moveTo(-2, -8); g.lineTo(2, 12); g.lineTo(-16, 12); g.moveTo(14, -8); g.lineTo(12, -16); g.stroke(); }
-  else if (art === 'rose') { st('#2a7a3a', 3); g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 30); g.stroke(); g.fillStyle = '#ff3a4a'; for (let i = 0; i < 5; i++) { const a = i * 1.26; g.beginPath(); g.arc(Math.cos(a) * 6, -6 + Math.sin(a) * 6, 8, 0, 7); g.fill(); } g.fillStyle = '#a0101e'; g.beginPath(); g.arc(0, -6, 5, 0, 7); g.fill(); }
-  else if (art === 'croissant') { g.fillStyle = '#b8701e'; g.beginPath(); g.arc(0, 6, 22, Math.PI * 1.05, Math.PI * 1.95); g.arc(0, 14, 12, Math.PI * 1.9, Math.PI * 1.1, true); g.fill(); st('#7a4510', 2); for (const dx of [-10, 0, 10]) { g.beginPath(); g.moveTo(dx, -14); g.lineTo(dx * 0.8, 2); g.stroke(); } }
-  else if (art === 'umbrella') { g.fillStyle = '#fff'; g.beginPath(); g.arc(0, 0, 22, Math.PI, 2 * Math.PI); g.fill(); st('#fff', 3); g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 24); g.arc(-5, 24, 5, 0, Math.PI); g.stroke(); }
-  else if (art === 'moon') { g.fillStyle = '#ffcf3a'; g.beginPath(); g.arc(0, 0, 18, 0, 7); g.fill(); g.fillStyle = '#1c1c24'; g.beginPath(); g.arc(8, -6, 15, 0, 7); g.fill(); g.fillStyle = '#fff'; for (const [sx, sy] of [[-26, -20], [22, 18], [-20, 22], [28, -24]]) g.fillRect(sx, sy, 2, 2); }
-  else if (art === 'bottle') { g.fillStyle = 'rgba(232,213,160,0.85)'; g.fillRect(-12, -8, 24, 32); g.fillStyle = '#e8d5a0'; g.fillRect(-4, -18, 8, 10); g.fillStyle = 'rgba(255,255,255,0.4)'; g.fillRect(-9, -4, 4, 24); }
-  g.restore();
+function adArt(c, art, x, y, s, col) {          // illustration simple, en coordonnées d'affiche
+  c.save(); c.translate(x, y); c.scale(s, s); c.lineCap = 'round';
+  const st = (c, w) => { c.strokeStyle = c; c.lineWidth = w; };
+  if (art === 'sax') { st(col, 7); c.beginPath(); c.moveTo(10, -30); c.lineTo(10, 15); c.quadraticCurveTo(10, 32, -6, 30); c.quadraticCurveTo(-18, 28, -16, 14); c.stroke(); c.fillStyle = '#fff'; for (let i = 0; i < 4; i++) { c.beginPath(); c.arc(10, -20 + i * 9, 2.2, 0, 7); c.fill(); } }
+  else if (art === 'cup') { c.fillStyle = '#fff'; c.fillRect(-16, -6, 26, 26); st('#fff', 4); c.beginPath(); c.arc(13, 6, 7, -1.5, 1.5); c.stroke(); st('rgba(255,255,255,0.6)', 2.5); for (const dx of [-10, -2, 6]) { c.beginPath(); c.moveTo(dx, -10); c.quadraticCurveTo(dx + 5, -18, dx, -26); c.stroke(); } c.fillStyle = '#6b4226'; c.fillRect(-14, -4, 22, 5); }
+  else if (art === 'loco') { c.fillStyle = '#1a1a1a'; c.fillRect(-26, -8, 40, 22); c.fillRect(4, -22, 12, 16); c.fillRect(-20, -18, 6, 10); c.fillStyle = '#c0392b'; c.fillRect(-26, 10, 44, 4); c.fillStyle = '#333'; for (const dx of [-18, -4, 10]) { c.beginPath(); c.arc(dx, 18, 6, 0, 7); c.fill(); } c.fillStyle = 'rgba(255,255,255,0.5)'; c.beginPath(); c.arc(-17, -26, 6, 0, 7); c.arc(-10, -32, 8, 0, 7); c.fill(); }
+  else if (art === 'bike') { st(col, 3.5); for (const dx of [-16, 16]) { c.beginPath(); c.arc(dx, 12, 11, 0, 7); c.stroke(); } c.beginPath(); c.moveTo(-16, 12); c.lineTo(-2, -8); c.lineTo(14, -8); c.lineTo(16, 12); c.moveTo(-2, -8); c.lineTo(2, 12); c.lineTo(-16, 12); c.moveTo(14, -8); c.lineTo(12, -16); c.stroke(); }
+  else if (art === 'rose') { st('#2a7a3a', 3); c.beginPath(); c.moveTo(0, 0); c.lineTo(0, 30); c.stroke(); c.fillStyle = '#ff3a4a'; for (let i = 0; i < 5; i++) { const a = i * 1.26; c.beginPath(); c.arc(Math.cos(a) * 6, -6 + Math.sin(a) * 6, 8, 0, 7); c.fill(); } c.fillStyle = '#a0101e'; c.beginPath(); c.arc(0, -6, 5, 0, 7); c.fill(); }
+  else if (art === 'croissant') { c.fillStyle = '#b8701e'; c.beginPath(); c.arc(0, 6, 22, Math.PI * 1.05, Math.PI * 1.95); c.arc(0, 14, 12, Math.PI * 1.9, Math.PI * 1.1, true); c.fill(); st('#7a4510', 2); for (const dx of [-10, 0, 10]) { c.beginPath(); c.moveTo(dx, -14); c.lineTo(dx * 0.8, 2); c.stroke(); } }
+  else if (art === 'umbrella') { c.fillStyle = '#fff'; c.beginPath(); c.arc(0, 0, 22, Math.PI, 2 * Math.PI); c.fill(); st('#fff', 3); c.beginPath(); c.moveTo(0, 0); c.lineTo(0, 24); c.arc(-5, 24, 5, 0, Math.PI); c.stroke(); }
+  else if (art === 'moon') { c.fillStyle = '#ffcf3a'; c.beginPath(); c.arc(0, 0, 18, 0, 7); c.fill(); c.fillStyle = '#1c1c24'; c.beginPath(); c.arc(8, -6, 15, 0, 7); c.fill(); c.fillStyle = '#fff'; for (const [sx, sy] of [[-26, -20], [22, 18], [-20, 22], [28, -24]]) c.fillRect(sx, sy, 2, 2); }
+  else if (art === 'bottle') { c.fillStyle = 'rgba(232,213,160,0.85)'; c.fillRect(-12, -8, 24, 32); c.fillStyle = '#e8d5a0'; c.fillRect(-4, -18, 8, 10); c.fillStyle = 'rgba(255,255,255,0.4)'; c.fillRect(-9, -4, 4, 24); }
+  c.restore();
+}
+// ---------- Publicités personnalisées : images déposées dans pubs/ et listées dans pubs/pubs.json ----------
+// Format conseillé : 2,5 × plus large que haut (ex. 1500 × 600 px). Si le fichier est absent (ou si le jeu est
+// ouvert directement depuis le disque), le jeu garde ses publicités fictives.
+const CUSTOM_ADS = []; let CUSTOM_MODE = 'melanger';
+function loadCustomAds() {
+  try {
+    fetch('pubs/pubs.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).then(cfg => {
+      if (!cfg || !Array.isArray(cfg.pubs)) return;
+      CUSTOM_MODE = cfg.mode === 'remplacer' ? 'remplacer' : 'melanger';
+      cfg.pubs.forEach((pb, i) => {
+        if (!pb || !pb.image) return;
+        const img = new Image();
+        img.onload = () => {
+          let avg = '#3a3a3a';   // couleur moyenne, utilisée quand l'affiche est trop loin pour être détaillée
+          try { const c = document.createElement('canvas'); c.width = c.height = 1; const x = c.getContext('2d'); x.drawImage(img, 0, 0, 1, 1); const d = x.getImageData(0, 0, 1, 1).data; avg = `rgb(${d[0]},${d[1]},${d[2]})`; } catch (e) {}
+          CUSTOM_ADS[i] = { title: 'pub:' + pb.image, nom: pb.nom || pb.image, img, bg: [avg, avg] };
+        };
+        img.src = 'pubs/' + encodeURI(pb.image);
+      });
+    }).catch(() => {});
+  } catch (e) {}
+}
+loadCustomAds();
+function adPool() {
+  const mine = CUSTOM_ADS.filter(Boolean);
+  if (!mine.length) return ADS;
+  return CUSTOM_MODE === 'remplacer' ? mine : ADS.concat(mine);
+}
+// texture de chaque publicité, peinte une seule fois (250 × 100 unités, en double résolution)
+const AD_W = 250, AD_H = 100, AD_RES = 3, AD_TEX = {};
+function adTexture(ad) {
+  if (AD_TEX[ad.title]) return AD_TEX[ad.title];
+  const cvs = document.createElement('canvas'); cvs.width = AD_W * AD_RES; cvs.height = AD_H * AD_RES;
+  const c = cvs.getContext('2d'); c.scale(AD_RES, AD_RES);
+  const bg = c.createLinearGradient(0, 0, AD_W, AD_H); bg.addColorStop(0, ad.bg[0]); bg.addColorStop(1, ad.bg[1]);
+  c.fillStyle = bg; c.fillRect(0, 0, AD_W, AD_H);
+  adArt(c, ad.art, 190, 50, 1.4, ad.col);
+  c.fillStyle = ad.col; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  c.font = 'bold 30px "Helvetica Neue", Arial, sans-serif'; c.fillText(ad.title, 14, 46, 150);
+  c.font = '15px "Helvetica Neue", Arial, sans-serif'; c.globalAlpha = 0.85; c.fillText(ad.sub, 14, 70, 150); c.globalAlpha = 1;
+  c.fillRect(14, 82, 40, 3); c.fillRect(14, 88, 26, 3);                                           // logo / mentions
+  const sheen = c.createLinearGradient(0, 0, AD_W, AD_H); sheen.addColorStop(0, 'rgba(255,255,255,0.18)'); sheen.addColorStop(0.4, 'rgba(255,255,255,0)'); sheen.addColorStop(1, 'rgba(255,255,255,0.06)');
+  c.fillStyle = sheen; c.fillRect(0, 0, AD_W, AD_H);                                               // reflet du plexiglas
+  return (AD_TEX[ad.title] = cvs);
 }
 function drawPoster(x, e, y0, y1, z0, z1, seed, f) {
-  const ad = ADS[((seed % ADS.length) + ADS.length) % ADS.length], xx = x + e * 0.03;
-  // coins projetés : la gauche de l'affiche (vue de face) est au loin sur le mur de droite, au près sur celui de gauche
-  const nearZ = z0, farZ = z1, leftZ = e < 0 ? farZ : nearZ, rightZ = e < 0 ? nearZ : farZ;
-  const TL = P(xx, y1, leftZ), TR = P(xx, y1, rightZ), BL = P(xx, y0, leftZ), BR = P(xx, y0, rightZ);
-  const wpx = Math.abs(TR[0] - TL[0]);
-  g.save(); g.beginPath(); g.moveTo(TL[0], TL[1]); g.lineTo(TR[0], TR[1]); g.lineTo(BR[0], BR[1]); g.lineTo(BL[0], BL[1]); g.closePath(); g.clip();
-  const bg = g.createLinearGradient(TL[0], TL[1], BR[0], BR[1]); bg.addColorStop(0, ad.bg[0]); bg.addColorStop(1, ad.bg[1]);
-  g.fillStyle = bg; g.fillRect(Math.min(TL[0], BL[0]) - 1, Math.min(TL[1], TR[1]) - 1, wpx + 2, Math.max(BL[1], BR[1]) - Math.min(TL[1], TR[1]) + 2);
-  if (wpx > 14) {
-    // repère d'affiche (250 × 100) projeté : axe horizontal le long du haut, axe vertical pris sur le bord le plus proche
-    const Wc = 250, Hc = 100, nearTop = e < 0 ? TR : TL, nearBot = e < 0 ? BR : BL;
-    g.transform((TR[0] - TL[0]) / Wc, (TR[1] - TL[1]) / Wc, (nearBot[0] - nearTop[0]) / Hc, (nearBot[1] - nearTop[1]) / Hc, TL[0], TL[1]);
-    adArt(ad.art, 190, 50, 1.4, ad.col);
-    g.fillStyle = ad.col; g.textAlign = 'left';
-    g.font = 'bold 30px "Helvetica Neue", Arial, sans-serif'; g.fillText(ad.title, 14, 46, 150);
-    g.font = '15px "Helvetica Neue", Arial, sans-serif'; g.globalAlpha = 0.85; g.fillText(ad.sub, 14, 70, 150); g.globalAlpha = 1;
-    g.fillStyle = ad.col; g.fillRect(14, 82, 40, 3); g.fillRect(14, 88, 26, 3);           // logo / mentions
-    const sheen = g.createLinearGradient(0, 0, Wc, Hc); sheen.addColorStop(0, 'rgba(255,255,255,0.18)'); sheen.addColorStop(0.4, 'rgba(255,255,255,0)'); sheen.addColorStop(1, 'rgba(255,255,255,0.06)');
-    g.fillStyle = sheen; g.fillRect(0, 0, Wc, Hc);                                       // reflet du plexiglas
+  const pool = adPool(), ad = pool[((seed % pool.length) + pool.length) % pool.length], xx = x + e * 0.03;
+  // sur le mur de droite (e < 0), la gauche de l'affiche est au loin ; sur celui de gauche, au près
+  const zAt = u => e < 0 ? z1 - (z1 - z0) * u / AD_W : z0 + (z1 - z0) * u / AD_W;
+  const wpx = Math.abs(P(xx, y1, z0)[0] - P(xx, y1, z1)[0]);
+  if (wpx <= 14) {   // trop loin : simple aplat de la couleur de fond
+    poly([[xx, y0, z0], [xx, y1, z0], [xx, y1, z1], [xx, y0, z1]], ad.bg[0]);
+  } else {
+    // découpe en bandes verticales : chacune est déformée selon sa propre position sur le mur,
+    // ce qui suit la vraie perspective (une seule déformation globale faisait glisser le contenu)
+    const tex = ad.img || adTexture(ad), N = 20, du = AD_W / N;
+    const tw = ad.img ? ad.img.naturalWidth : AD_W * AD_RES, th = ad.img ? ad.img.naturalHeight : AD_H * AD_RES;
+    for (let i = 0; i < N; i++) {
+      const u0 = i * du, u1 = u0 + du;
+      const A = P(xx, y1, zAt(u0)), B = P(xx, y1, zAt(u1)), Cb = P(xx, y0, zAt(u0)), Db = P(xx, y0, zAt(u1));
+      g.save();
+      g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.lineTo(Db[0], Db[1]); g.lineTo(Cb[0], Cb[1]); g.closePath(); g.clip();
+      // repère local de la bande : axe horizontal le long du haut, axe vertical sur son bord gauche
+      g.transform((B[0] - A[0]) / du, (B[1] - A[1]) / du, (Cb[0] - A[0]) / AD_H, (Cb[1] - A[1]) / AD_H, A[0], A[1]);
+      g.drawImage(tex, u0 / AD_W * tw, 0, du / AD_W * tw, th, 0, 0, du * 1.06, AD_H);
+      g.restore();
+    }
   }
-  g.restore();
   if (f < 1) poly([[xx, y0, z0], [xx, y1, z0], [xx, y1, z1], [xx, y0, z1]], `rgba(${FOG_ST.join(',')},${(1 - f).toFixed(3)})`);   // brume au loin
 }
 

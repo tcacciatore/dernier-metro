@@ -38,6 +38,12 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 - 3 arrêts ratés ;
 - trafic de la ligne saturé à 100 %.
 
+## Vos propres publicités
+
+Déposez vos affiches dans le dossier [`pubs/`](pubs/) et listez-les dans `pubs/pubs.json` :
+elles apparaissent sur les murs des quais. Le mode d'emploi et le cahier des charges (format 1500 × 600 px)
+sont dans [`pubs/README.md`](pubs/README.md).
+
 ## Lancer en local
 
 Le jeu tient dans un seul fichier, `index.html`, sans dépendance.

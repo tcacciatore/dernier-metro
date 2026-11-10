@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="600" viewBox="0 0 1500 600">
+  <defs>
+    <linearGradient id="fond" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d3c8f"/>
+      <stop offset="1" stop-color="#0b1a40"/>
+    </linearGradient>
+  </defs>
+  <rect width="1500" height="600" fill="url(#fond)"/>
+  <!-- zone de sécurité : garder l'essentiel à l'intérieur de ce cadre -->
+  <rect x="60" y="45" width="1380" height="510" fill="none" stroke="#ffd75e" stroke-width="4" stroke-dasharray="24 16" opacity="0.6"/>
+  <circle cx="1170" cy="300" r="170" fill="#ffd75e"/>
+  <text x="1170" y="350" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="150" fill="#0b1a40" text-anchor="middle">VOUS</text>
+  <text x="110" y="260" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="130" fill="#ffffff">Votre pub ici</text>
+  <text x="110" y="360" font-family="Helvetica, Arial, sans-serif" font-size="58" fill="#cfe0ff">Format 1500 × 600 px · titre gros et court</text>
+  <rect x="110" y="430" width="240" height="18" fill="#ffd75e"/>
+  <rect x="110" y="466" width="160" height="18" fill="#ffd75e" opacity="0.6"/>
+</svg>
