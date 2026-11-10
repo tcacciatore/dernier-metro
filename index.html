@@ -992,13 +992,9 @@ function startLeg() {
   }
   else if (r < 0.51) {           // 2. ordre du PCC : station fermée (traversée sans arrêt) ou régulation (arrêt prolongé)
     S.inc = 'pcc'; col = '#9fe0ff';
-    if (!last && n.name !== busiestStation() && Math.random() < 0.55) {
-      n.closed = true; n.people = []; const keep = n.dep - n.arr; n.dep = n.arr; shiftSchedule(S.next + 1, -keep);
-      text = `📻 PCC : station ${n.name} fermée. Traversez-la sans vous arrêter, 30 km/h max.`;
-    } else {
-      n.dep += 10; shiftSchedule(S.next + 1, 10);
-      text = `📻 PCC : régulation. Marquez l'arrêt 10 s de plus à ${n.name}.`;
-    }
+    // régulation : marquer l'arrêt 10 s de plus à la prochaine station
+    n.dep += 10; shiftSchedule(S.next + 1, 10);
+    text = `📻 PCC : régulation. Marquez l'arrêt 10 s de plus à ${n.name}.`;
     beep(1400, 0.05, 'square', 0.04); noise(0.4, 0.08, 'bandpass', 1800, 2);
   }
   else if (r < 0.60) {           // 5. malaise voyageur : arrêt obligatoire et intervention des secours
