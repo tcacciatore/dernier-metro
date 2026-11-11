@@ -1348,9 +1348,14 @@ function swRed() {
 }
 function planSwitch(cur, n, D, L) {
   S.sw = null; S.mg = null; S.rev = null;
-  if (S.inc && S.inc !== 'crowd' && S.inc !== 'pcc') return;
-  if (D < 260 || Math.random() > Math.min(0.6, 0.25 + 0.3 * L.inc)) return;
-  const kind = wpick({ fork: 0.45, merge: 0.35, manual: 0.2 });
+  // incompatibles : travaux, signal rouge, personne ou chien sur la voie (même portion de tunnel)
+  if (['limit', 'signal', 'person', 'dog'].includes(S.inc) || D < 260) return;
+  const seen = S.swSeen || (S.swSeen = []);
+  const force = !seen.length && S.next >= 2;                       // au moins un aiguillage dès le 2e trajet
+  if (!force && Math.random() > 0.3 + 0.35 * L.inc) return;
+  const fresh = ['fork', 'merge', 'manual'].filter(k => !seen.includes(k));   // on fait découvrir chaque type
+  const kind = fresh.length ? pick(fresh) : wpick({ fork: 0.45, merge: 0.35, manual: 0.2 });
+  seen.push(kind);
   const pos = cur.pos + PE + 60 + Math.random() * (D - PL - PE - 140);
   const w = S.sw = { kind, pos, sig: pos - SW_SIG, d0: pos - cur.pos, want: 'D', set: 'D', fixT: 0, called: false, passed: false, sigPassed: false, eta: null, start: 0, stopped: false, done: false, limOn: false };
   const dist = Math.round((pos - cur.pos) / 10) * 10;
