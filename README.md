@@ -25,7 +25,8 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 | **Entrée** | Fermer les portes |
 | **Espace** | Veille automatique (quand elle sonne) |
 | **K** | Klaxon |
-| **A** | Radio / alarme (aiguille mal tracée, incidents à bord) |
+| **A** | Radio / alarme (incidents à bord) |
+| **← / →** | Choisir la direction à la bifurcation (direct / dévié) |
 | **E** | Descendre manœuvrer une aiguille en panne |
 | **V** | Annonces voyageurs |
 | **M** | Missions |
@@ -35,9 +36,9 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 
 ## Aiguillages
 
-- **Bifurcation** : le PCC annonce l'itinéraire (direct ou dévié). Vérifiez l'indicateur ; s'il est faux, prévenez le PCC (**A**) avant l'aiguille, sinon c'est le retour en marche arrière.
+- **Bifurcation** : l'écran ITINÉRAIRE de la cabine affiche la direction demandée par le PCC. Sélectionnez-la avec **←** (direct) ou **→** (dévié) avant d'arriver à 20 m de l'aiguille ; le signal reste fermé pendant le mouvement (3 s). Le PCC peut changer d'itinéraire en route. Mauvaise direction : retour en marche arrière.
 - **Voie déviée** : 30 km/h sur l'aiguille, annoncé par un panneau jaune.
-- **Convergence** : un train arrive de l'autre branche. Au signal jaune, ralentissez pour arriver quand le signal passe au vert (bonus si vous ne vous arrêtez pas).
+- **Traversée** : un train venu d'une voie latérale coupe votre voie en oblique, puis repart de l'autre côté. Au signal jaune, ralentissez pour arriver quand le signal passe au vert (bonus si vous ne vous arrêtez pas).
 - **Aiguille en panne** : arrêtez-vous avant le signal, descendez (**E**), marchez jusqu'au levier et calez l'aiguille en rythme (**Espace**).
 
 ## Fin de partie
@@ -68,3 +69,13 @@ puis rendez-vous sur http://localhost:8000.
 ---
 
 Jeu de fiction, sans lien avec la RATP. Les noms de stations sont ceux des vraies lignes du métro de Paris ; les marques et publicités affichées sont imaginaires.
+
+## Classement et médailles
+
+- Chaque service terminé entre dans le **classement de la ligne** (5 meilleurs scores, avec la date). Sur l'écran d'accueil, **C** l'affiche.
+- En plus de la médaille de score, trois **médailles de catégorie** sont attribuées à chaque service (bronze 50 %, argent 75 %, or 95 %) :
+  - **Ponctualité** : part des arrivées à l'heure ;
+  - **Aiguillages** : part des aiguillages passés sans faute ;
+  - **Voyageurs** : voyageurs embarqués et sécurité.
+- La meilleure médaille obtenue dans chaque catégorie est conservée par ligne.
+

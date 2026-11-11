@@ -19,6 +19,7 @@
 const cv = document.getElementById('c');
 const g = cv.getContext('2d');
 const W = 384, H = 216, VIEW_H = 170;
+const VERSION = 'v1.6 · classement et médailles';
 let RES = 2;
 
 // Remplit la fenêtre en gardant le 16:9, avec un facteur entier en pixels
@@ -186,13 +187,14 @@ function legTime(d, a, b, vmax) {      // trajet le plus rapide : pleine tractio
   return vp / a + vp / b + Math.max(0, d - vp * vp / (2 * a) - vp * vp / (2 * b)) / vp;
 }
 const fastestLeg = d => legTime(d, 1.1, 1.5, REF_VMAX);        // référence de l'horaire (ne pas modifier : fixe la difficulté)
-const playerFastestLeg = d => legTime(d, 1.45, 2.2, VMAX);     // ce que la rame peut réellement faire, à fond
+const schedLeg = d => legTime(d, 1.45, 2.2, VMAX);             // base de l'horaire (inchangée quand la traction a été renforcée)
+const playerFastestLeg = d => legTime(d, 2.0, 2.2, VMAX);      // ce que la rame peut réellement faire, à fond
 function buildLine() {
   loadLine();
   const L = LN();
   let p = 0;
   STATIONS.forEach((s, i) => {
-    if (i > 0) { p += s.dist; s.arr = STATIONS[i - 1].dep + Math.round(playerFastestLeg(s.dist) * L.tight + 1.5); }
+    if (i > 0) { p += s.dist; s.arr = STATIONS[i - 1].dep + Math.round(schedLeg(s.dist) * L.tight + 1.5); }
     else s.arr = T0;
     s.pos = p; s.dep = s.arr + (i === 0 ? 25 : L.dwell);
     s.baseArr = s.arr; s.baseDep = s.dep;
@@ -274,6 +276,17 @@ function pen(pts, text) {
 const MEDALS = [[2000, 'BRONZE', '#d08a4a'], [4500, 'ARGENT', '#c8d0dc'], [8000, 'OR', '#ffd75e']];
 const medalOf = sc => { let m = null; MEDALS.forEach(x => { if (sc >= x[0]) m = x; }); return m; };
 const nextMedal = sc => MEDALS.find(x => sc < x[0]) || null;
+// médailles par catégorie : 0 aucune, 1 bronze, 2 argent, 3 or
+const CAT = [['PONCTUALITÉ', 'à l\'heure'], ['AIGUILLAGES', 'sans faute'], ['VOYAGEURS', 'servis et en sécurité']];
+const catLevel = r => r === null ? -1 : r >= 0.95 ? 3 : r >= 0.75 ? 2 : r >= 0.5 ? 1 : 0;
+const LVL = [null, ['BRONZE', '#d08a4a'], ['ARGENT', '#c8d0dc'], ['OR', '#ffd75e']];
+function loadTop(id) { try { const a = JSON.parse(localStorage.getItem('dm_top_' + id) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function loadCat(id) { try { const a = JSON.parse(localStorage.getItem('dm_cat_' + id) || '[0,0,0]'); return Array.isArray(a) && a.length === 3 ? a : [0, 0, 0]; } catch (e) { return [0, 0, 0]; } }
+function medalDot(x, y, lv, r = 4) {
+  if (lv < 0) { txt('—', x, y + 3, 10, '#4a5468', 'center'); return; }
+  g.fillStyle = lv ? LVL[lv][1] : '#2a3040'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  if (lv) { g.fillStyle = 'rgba(255,255,255,0.45)'; g.beginPath(); g.arc(x - r * 0.35, y - r * 0.35, r * 0.35, 0, 7); g.fill(); }
+}
 const secPct = () => Math.max(0, Math.round(100 - (S.secLost || 0) / 5));
 function starRow(x, y, stars, size = 11) {   // ★ précision · ★ horaire · ★ quai vidé (null = non noté)
   [['p', 'arrêt'], ['t', 'horaire'], ['v', 'quai']].forEach(([k, l], i) => {
@@ -537,9 +550,8 @@ function doAnnonce(n) {
 function radioCall() {
   beep(1400, 0.05, 'square', 0.04); noise(0.3, 0.08, 'bandpass', 1800, 2);
   const sw = S.sw;
-  if (sw && sw.kind === 'fork' && !sw.passed && !S.rev && sw.set !== sw.want && sw.fixT <= 0 && S.phase === 'drive') {
-    sw.fixT = SW_FIX; sw.called = true; S.score += 30;
-    msg('Radio : « Aiguille mal tracée ! » Le PCC la retrace, signal fermé (+30)', '#7dff8a', 3.5); return;
+  if (sw && sw.kind === 'fork' && !sw.passed && !S.rev && sw.tgt !== sw.want && S.phase === 'drive') {
+    msg(`Radio : « Prenez ${dirName(sw.want)}, utilisez votre sélecteur ← → »`, '#9fe0ff', 3.5); return;
   }
   if (S.malaise && S.malaise.shown && !S.malaise.called && !S.malaise.expired) {
     S.malaise.called = true; S.malaise.calledAt = S.malaise.t; S.score += 30;
@@ -684,7 +696,9 @@ addEventListener('keydown', e => {
       LINE = k === 'arrowleft' ? (LINE + nL - 1) % nL : k === 'arrowright' ? (LINE + 1) % nL : +k - 1;
       saveBest(); reset('title'); beep(660, 0.06, 'square', 0.04);
     }
-    if (k === 'enter' || k === 't') startService(k === 't');
+    if (k === 'c') { TITLE.rank = !TITLE.rank; beep(TITLE.rank ? 880 : 520, 0.05, 'square', 0.04); return; }
+    if (TITLE.rank && k === 'escape') { TITLE.rank = false; return; }
+    if (k === 'enter' || k === 't') { TITLE.rank = false; startService(k === 't'); }
     return;
   }
   if (S.mode === 'end') { if (k === 'enter' || k === 'r') reset('running'); return; }
@@ -695,6 +709,7 @@ addEventListener('keydown', e => {
   }
   if (S.mg && k !== 'escape') { if (k === ' ' && !e.repeat) mgHit(); return; }
   if (k === 'e' && !e.repeat && S.mode === 'running') { if (canManual()) startManual(); else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') msg(S.v > 0 ? 'Arrêtez d\'abord la rame' : 'Approchez-vous du signal de l\'aiguille', '#ffd75e', 2); return; }
+  if ((k === 'arrowleft' || k === 'arrowright') && S.mode === 'running') { chooseDir(k === 'arrowleft' ? 'D' : 'G'); return; }
   if (k === ' ') { vacmaAck(); return; }
   if (k === 'k') {
     sfxHorn(); S.hornT = 0.7;
@@ -1089,9 +1104,9 @@ function drawHint() {
   else if (S.rev) hint = 'MAUVAIS ITINÉRAIRE : retour en marche arrière';
   else if (canManual()) hint = 'E : descendre sur la voie pour manœuvrer l\'aiguille';
   else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') hint = `AIGUILLE EN PANNE à ${Math.max(0, Math.round(S.sw.sig - S.pos))} m : arrêtez-vous avant le signal rouge`;
-  else if (S.sw && S.sw.kind === 'merge' && swRed() && S.phase === 'drive') hint = 'SIGNAL JAUNE : convergence, préparez-vous à l\'arrêt au signal (ou arrivez quand il passe au vert)';
+  else if (S.sw && S.sw.kind === 'merge' && swRed() && S.phase === 'drive') hint = 'SIGNAL JAUNE : un train traverse votre voie, ralentissez pour arriver quand le signal passe au vert';
   else if (S.sw && S.sw.kind === 'fork' && S.sw.limOn) hint = S.v * 3.6 > 31 ? `VOIE DÉVIÉE : 30 km/h ! Déraillement au-delà de ${30 + DERAIL}` : 'VOIE DÉVIÉE : 30 km/h sur l\'aiguille';
-  else if (S.sw && S.sw.kind === 'fork' && !S.sw.passed && S.sw.pos - S.pos < 130 && S.phase === 'drive') hint = `BIFURCATION : prévu ${S.sw.want === 'D' ? 'DIRECT' : 'DÉVIÉ'} — l'indicateur montre ${S.sw.fixT > 0 ? '…' : S.sw.set === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Faux ? A`;
+  else if (S.sw && S.sw.kind === 'fork' && !S.sw.passed && S.sw.pos - S.pos < 200 && S.phase === 'drive') hint = S.sw.tgt === S.sw.want ? `BIFURCATION : direction ${S.sw.want === 'D' ? 'DIRECTE' : 'DÉVIÉE (30 km/h)'} sélectionnée${S.sw.fixT > 0 ? ', aiguille en mouvement…' : ''}` : `BIFURCATION : mauvaise direction sélectionnée ! ${S.sw.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}`;
   else if (S.blackout) hint = 'COUPURE D\'ÉCLAIRAGE : suivez la courbe, les panneaux 50 / 25 / 10 et les bips';
   else if (S.sigRed > 0) hint = 'Signal rouge : attendez le vert';
   else if (S.limit && S.v * 3.6 > S.limit + 1) hint = `TROP VITE ! Au-delà de ${S.limit + DERAIL} km/h, la rame déraille : freinez (S)`;
@@ -1207,7 +1222,8 @@ function startLeg() {
     S.dog = { pos: cur.pos + D * (0.3 + Math.random() * 0.2), x: (Math.random() - 0.5) * 0.6, state: 'sit', seen: false, hit: false,
       walk: 0, stT: 1.5, runT: 0, horns: 0, wag: 0, col: pick(['#8a5a2a', '#2a2420', '#c8a060', '#e8e0d0', '#6a6a6a']) };
   }
-  planSwitch(cur, n, D, L);
+  S.swCleared = false; planSwitch(cur, n, D, L);
+  if (S.swCleared) text = '';
   if (text) msg(text, col, 5);   // le temps perdu n'est pas rendu : il faudra le rattraper
   // incidents à bord (vus sur la caméra intérieure), tirés à part : ils s'ajoutent aux incidents de voie
   if (!S.malaise && Math.random() < Math.min(0.65, 0.2 + 0.5 * L.inc)) {
@@ -1321,8 +1337,8 @@ function drawIncidentBars() {
   if (dg && dg.seen && ['sit', 'trot', 'run'].includes(dg.state)) L.push(['CHIEN SUR LA VOIE · K', 1 - (dg.t || 0) / DOG_T, '#ffb35e']);
   if (pe && pe.seen && pe.state === 'track') L.push(['PERSONNE SUR LA VOIE · K', 1 - (pe.t || 0) / PERSON_T, '#ff4a3a']);
   const w = S.sw;
-  if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / SW_FIX, '#ffd75e'] : [`BIFURCATION · ${w.want === 'D' ? 'DIRECT' : 'DÉVIÉ 30'}`, (w.pos - S.pos) / w.d0, '#9fe0ff']);
-  if (w && w.kind === 'merge' && w.eta !== null && swRed()) L.push(['CONVERGENCE · cédez', (w.eta + 0.8 - S.clock) / (w.eta + 0.8 - w.start), '#ffd75e']);
+  if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / SW_FIX, '#ffd75e'] : [`BIFURCATION · ${w.want === 'D' ? '← DIRECT' : '→ DÉVIÉ 30'}`, (w.pos - S.pos) / w.d0, w.tgt === w.want ? '#9fe0ff' : '#ff6b5b']);
+  if (w && w.kind === 'merge' && w.eta !== null && swRed()) L.push(['TRAVERSÉE · cédez', (w.eta + 0.8 - S.clock) / (w.eta + 0.8 - w.start), '#ffd75e']);
   if (w && w.kind === 'manual' && !w.done) L.push([S.mg ? 'MANŒUVRE EN COURS' : 'AIGUILLE EN PANNE · E', S.mg ? 1 - S.mg.hits / 3 : Math.max(0, (w.sig - S.pos) / w.d0), '#ff8a5b']);
   const st = STATIONS[S.next], dz = st ? st.pos - S.pos : 99, top = dz <= 15 && dz >= -PE ? 80 : 6;   // sous le zoom d'arrêt s'il est affiché
   L.forEach(([lab, fr, col], i) => {
@@ -1335,11 +1351,28 @@ function drawIncidentBars() {
   });
 }
 // ---------- Aiguillages : bifurcation, voie déviée, convergence, manœuvre manuelle ----------
-const SW_LEN = 34, SW_SIG = 8, SW_DEV = 30, SW_FIX = 4;   // longueur de la branche visible, signal 8 m avant l'aiguille
+const SW_LEN = 34, SW_SIG = 8, SW_DEV = 30, SW_FIX = 3, SW_LOCK = 20;   // longueur de la branche visible, signal 8 m avant l'aiguille
 const swOff = (w, z) => {                                 // décalage latéral (vers la droite) de la branche au point z
   const u = w.kind === 'merge' ? (w.pos - z) / SW_LEN : (z - w.pos) / SW_LEN;
   return u < 0 || u > 1 ? null : 3.6 * Math.pow(u, 1.15);
 };
+// traversée : une voie oblique coupe la nôtre au point w.pos, de la gauche (près) vers la droite (loin)
+const XU = 8 / Math.hypot(8, 12), XZ = 12 / Math.hypot(8, 12), X_LEN = 30, X_V = 11, X_SC = 4 / XU;   // X_SC : abscisse du croisement
+const xPt = (w, s) => [-4 + XU * s, w.pos - 6 + XZ * s];
+const X_IN = (4 - 2.29) / XU, X_OUT = (4 + 2.29) / XU;               // entrée / sortie entre les piédroits
+const X_CLEAR = X_SC + 2.7 / XU + X_LEN;                              // la queue a dégagé notre voie
+function dirName(k) { return k === 'D' ? `la voie DIRECTE (direction ${STATIONS[STATIONS.length - 1].name})` : 'la voie DÉVIÉE (30 km/h)'; }
+// sélecteur de direction en cabine : le conducteur commande l'aiguille avant de l'atteindre
+function chooseDir(k) {
+  const w = S.sw;
+  if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return false;
+  if (w.pos - S.pos < SW_LOCK) { msg('Aiguille verrouillée : la rame est trop près', '#ff6b5b', 2); beep(220, 0.15, 'square', 0.04); return true; }
+  if (k === w.tgt) { beep(990, 0.05, 'sine', 0.04); return true; }
+  w.tgt = k; w.fixT = SW_FIX; w.chose = true;
+  beep(700, 0.06, 'square', 0.04); noise(0.4, 0.1, 'bandpass', 500, 2);
+  msg(`Itinéraire commandé : ${k === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Aiguille en mouvement, signal fermé`, '#ffd75e', 2.5);
+  return true;
+}
 function swRed() {
   const w = S.sw; if (!w) return false;
   if (w.kind === 'manual') return !w.done;
@@ -1349,20 +1382,24 @@ function swRed() {
 function planSwitch(cur, n, D, L) {
   S.sw = null; S.mg = null; S.rev = null;
   // incompatibles : travaux, signal rouge, personne ou chien sur la voie (même portion de tunnel)
-  if (['limit', 'signal', 'person', 'dog'].includes(S.inc) || D < 260) return;
   const seen = S.swSeen || (S.swSeen = []);
-  const force = !seen.length && S.next >= 2;                       // au moins un aiguillage dès le 2e trajet
+  const force = !seen.length && D >= 260;                          // le premier trajet assez long a toujours son aiguillage
+  if (force && ['limit', 'signal', 'person', 'dog'].includes(S.inc)) {   // il remplace l'incident de voie incompatible
+    S.inc = null; S.limit = 0; S.sigPos = null; S.sigRed = 0; S.person = null; S.dog = null; S.swCleared = true;
+  }
+  if (['limit', 'signal', 'person', 'dog'].includes(S.inc) || D < 260) return;
   if (!force && Math.random() > 0.3 + 0.35 * L.inc) return;
   const fresh = ['fork', 'merge', 'manual'].filter(k => !seen.includes(k));   // on fait découvrir chaque type
   const kind = fresh.length ? pick(fresh) : wpick({ fork: 0.45, merge: 0.35, manual: 0.2 });
   seen.push(kind);
   const pos = cur.pos + PE + 60 + Math.random() * (D - PL - PE - 140);
+  S.swN = (S.swN || 0) + 1;
   const w = S.sw = { kind, pos, sig: pos - SW_SIG, d0: pos - cur.pos, want: 'D', set: 'D', fixT: 0, called: false, passed: false, sigPassed: false, eta: null, start: 0, stopped: false, done: false, limOn: false };
   const dist = Math.round((pos - cur.pos) / 10) * 10;
   if (kind === 'fork') {
-    w.want = Math.random() < 0.4 ? 'G' : 'D';
-    w.set = Math.random() < 0.4 ? (w.want === 'D' ? 'G' : 'D') : w.want;
-    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : bifurcation à ${dist} m, itinéraire ${w.want === 'D' ? 'DIRECT' : 'DÉVIÉ (30 km/h)'}. Vérifiez l'indicateur, A s'il est faux.`, '#9fe0ff', 6); }, 1500);
+    w.want = Math.random() < 0.45 ? 'G' : 'D';
+    w.set = Math.random() < 0.5 ? 'G' : 'D'; w.tgt = w.set; w.wrong0 = w.set !== w.want; w.chg = Math.random() < 0.3 && w.d0 > 230;
+    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : bifurcation à ${dist} m, prenez ${dirName(w.want)}. Choisissez la direction : ← direct, → dévié.`, '#9fe0ff', 6); }, 1500);
   } else if (kind === 'manual') {
     setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : aiguille en panne à ${dist} m. Arrêtez-vous au signal, puis E pour la manœuvrer à la main.`, '#ffb35e', 6); }, 1500);
   }
@@ -1372,22 +1409,29 @@ function updateSwitch(dt) {
   const dp = w.sig - S.pos;
   if (w.kind === 'merge' && w.eta === null && dp < 190) {
     w.eta = S.clock + dp / VMAX + 1.5 + Math.random() * 3; w.start = S.clock;   // à pleine vitesse, on bute sur le rouge : il faut ralentir tôt
-    msg('Signal jaune : un train arrive de l\'autre branche. Cédez-lui le passage !', '#ffd75e', 3.5);
+    w.t0 = w.eta - X_CLEAR / X_V;
+    msg('Signal jaune : un train va traverser votre voie. Laissez-le passer !', '#ffd75e', 3.5);
     beep(1250, 0.1, 'square', 0.04); beep(1250, 0.1, 'square', 0.04, 0.2);
   }
   if (w.kind === 'fork' && w.fixT > 0) {
     w.fixT -= dt;
-    if (w.fixT <= 0) { w.fixT = 0; w.set = w.want; msg('Aiguille retracée : bon itinéraire, signal ouvert', '#7dff8a', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
+    if (w.fixT <= 0) { w.fixT = 0; w.set = w.tgt; msg(`Aiguille en position ${w.set === 'D' ? 'DIRECT' : 'DÉVIÉ'} : signal ouvert`, w.set === w.want ? '#7dff8a' : '#ffd75e', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
+  }
+  if (w.kind === 'fork' && w.chg && !w.passed && w.pos - S.pos < 150 && w.pos - S.pos > 70) {   // le PCC change d'itinéraire en route
+    w.chg = false; w.want = w.want === 'D' ? 'G' : 'D'; w.chgT = S.t;
+    msg(`📻 PCC : CHANGEMENT D'ITINÉRAIRE ! ${w.want === 'D' ? 'Voie déviée occupée' : 'Voie directe occupée'}, prenez ${dirName(w.want)}`, '#ffb35e', 5);
+    for (let i = 0; i < 2; i++) beep(1250, 0.1, 'square', 0.05, i * 0.2);
   }
   if (!w.sigPassed && S.v === 0 && dp < 40 && (w.kind !== 'merge' || w.eta !== null)) w.stopped = true;
   if (!w.sigPassed && S.pos > w.sig - 0.3) {
     w.sigPassed = true;
     if (swRed()) {
-      S.ebrake = true;
+      S.ebrake = true; w.bad = true;
+      S.swBad = (S.swBad || 0) + 1;
       if (w.kind === 'manual') { w.done = true; pen(-150, 'Aiguille talonnée : franchissement avant la manœuvre !'); }
-      else if (w.kind === 'merge') pen(-80, 'Signal rouge franchi : le train de la branche freine d\'urgence !');
-      else { w.fixT = 0; w.set = w.want; pen(-80, 'Signal rouge franchi pendant le mouvement de l\'aiguille !'); }
-    } else if (w.kind === 'merge' && !w.stopped) { S.score += 40; msg('Convergence bien anticipée, sans arrêt (+40)', '#7dff8a', 3); }
+      else if (w.kind === 'merge') pen(-80, 'Signal rouge franchi : le train qui traverse freine d\'urgence !');
+      else { w.fixT = 0; w.set = w.tgt; pen(-80, 'Signal rouge franchi pendant le mouvement de l\'aiguille !'); }
+    } else if (w.kind === 'merge' && !w.stopped) { S.score += 40; msg('Traversée bien anticipée, sans arrêt (+40)', '#7dff8a', 3); }
   }
   if (w.kind === 'fork') {
     const inZ = w.set === 'G' && S.pos > w.pos - 3 && S.pos < w.pos + SW_DEV + 5;
@@ -1395,10 +1439,10 @@ function updateSwitch(dt) {
     if (!w.passed && S.pos > w.pos) {
       w.passed = true;
       if (w.set !== w.want) {
-        S.ebrake = true; S.rev = { t: 0 };
+        S.ebrake = true; S.rev = { t: 0 }; if (!w.bad) { w.bad = true; S.swBad = (S.swBad || 0) + 1; }
         pen(-100, `Mauvais itinéraire : la rame part en voie ${w.set === 'D' ? 'directe' : 'déviée'} !`);
         for (let i = 0; i < 3; i++) beep(330, 0.2, 'sawtooth', 0.05, i * 0.25);
-      }
+      } else if (w.chose && (w.wrong0 || w.chgT)) { S.score += 30; msg('Bonne direction prise (+30)', '#7dff8a', 2.5); }
     }
   }
 }
@@ -1408,7 +1452,7 @@ function updateReverse(dt) {
   S.ebrake = false; r.t += dt; S.clock += dt * 3;
   if (r.t >= REV_T) {
     const w = S.sw; S.rev = null;
-    if (w) { w.set = w.want; w.passed = false; w.sigPassed = true; S.pos = w.pos - 14; w.limOn = false; S.limit = 0; }
+    if (w) { w.set = w.tgt = w.want; w.passed = false; w.sigPassed = true; S.pos = w.pos - 14; w.limOn = false; S.limit = 0; }
     msg('Retour effectué, bon itinéraire tracé : repartez', '#9fe0ff', 3);
   }
 }
@@ -1504,27 +1548,91 @@ function drawReverse() {
   g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(W / 2 - 70, 94, 140, 4);
   g.fillStyle = '#ffb35e'; g.fillRect(W / 2 - 70, 94, 140 * Math.min(1, r.t / REV_T), 4);
 }
-// indicateur d'itinéraire répété en cabine, à l'approche de la bifurcation
+// écran d'itinéraire en cabine : direction demandée par le PCC et sélecteur ← →
 function drawSwitchPanel() {
   const w = S.sw; if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return;
-  const dp = w.pos - S.pos; if (dp > 130 || dp < 0) return;
-  const x = 6, y = 62, bw = 54, bh = 44;
-  g.fillStyle = 'rgba(6,8,14,0.9)'; g.fillRect(x, y, bw, bh); g.strokeStyle = '#555c6a'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
-  txt('INDICATEUR', x + bw / 2, y + 8, 9, '#8fa0b8', 'center');
-  if (w.fixT > 0) { if (Math.floor(S.t * 4) % 2) txt('· · ·', x + bw / 2, y + 28, 14, '#ffd75e', 'center'); }
-  else {
-    const cx = x + bw / 2, cy = y + 26, col = '#ffffff';
-    if (w.set === 'D') { seg(cx, cy + 9, cx, cy - 8, 3, col); seg(cx, cy - 9, cx - 5, cy - 3, 3, col); seg(cx, cy - 9, cx + 5, cy - 3, 3, col); }
-    else { seg(cx - 6, cy + 9, cx + 6, cy - 7, 3, col); seg(cx + 7, cy - 8, cx, cy - 7, 3, col); seg(cx + 7, cy - 8, cx + 6, cy - 1, 3, col); }
-    txt(w.set === 'D' ? 'DIRECT' : 'DÉVIÉ', cx, y + bh - 4, 10, w.set === 'D' ? '#ffffff' : '#ffd75e', 'center');
+  const dp = w.pos - S.pos; if (dp < 0) return;
+  const cam = S.camAt !== undefined && S.t - S.camAt < 0.15;     // caméra intérieure ouverte : l'écran se range à sa droite
+  const x = cam ? 160 : 6, y = cam ? VIEW_H - 64 : 62, bw = 76, bh = 60, ok = w.tgt === w.want, lock = dp < SW_LOCK;
+  const chg = w.chgT && S.t - w.chgT < 3 && Math.floor(S.t * 6) % 2;
+  g.fillStyle = 'rgba(6,8,14,0.92)'; g.fillRect(x, y, bw, bh);
+  g.strokeStyle = chg ? '#ffb35e' : ok ? '#4f6a86' : (Math.floor(S.t * 4) % 2 ? '#ff4a3a' : '#7a2a26'); g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
+  txt('ITINÉRAIRE', x + 4, y + 8, 8, '#8fa0b8');
+  txt(`${Math.round(dp)} m`, x + bw - 4, y + 8, 8, '#ffffff', 'right');
+  // direction demandée
+  const term = STATIONS[STATIONS.length - 1].name;
+  txt('PCC :', x + 4, y + 18, 8, '#8fa0b8');
+  txt(w.want === 'D' ? `DIRECT › ${term}` : 'DÉVIÉ · 30 km/h', x + 22, y + 18, 9, chg ? '#ffb35e' : '#9fe0ff', 'left', 'VT323', bw - 26);
+  // deux touches de sélection
+  const opt = (k, bx, label) => {
+    const sel = w.tgt === k, good = k === w.want, by = y + 24, ww = 34, hh = 22;
+    g.fillStyle = sel ? (good ? '#12351c' : '#3a1210') : '#11151e'; g.fillRect(bx, by, ww, hh);
+    g.strokeStyle = sel ? (good ? '#7dff8a' : '#ff6b5b') : '#2c3442'; g.lineWidth = sel ? 1.5 : 1; g.strokeRect(bx + 0.5, by + 0.5, ww - 1, hh - 1);
+    const cx = bx + ww / 2, cy = by + 9, col = sel ? '#ffffff' : '#5a6474';
+    if (k === 'D') { seg(cx, cy + 5, cx, cy - 4, 2, col); seg(cx, cy - 5, cx - 3, cy - 2, 2, col); seg(cx, cy - 5, cx + 3, cy - 2, 2, col); }
+    else { seg(cx - 4, cy + 5, cx + 4, cy - 4, 2, col); seg(cx + 4, cy - 5, cx, cy - 4, 2, col); seg(cx + 4, cy - 5, cx + 4, cy - 1, 2, col); }
+    txt(label, cx, by + 19, 8, sel ? (good ? '#7dff8a' : '#ff6b5b') : '#5a6474', 'center');
+  };
+  opt('D', x + 3, '← DIRECT'); opt('G', x + 39, 'DÉVIÉ →');
+  // état de l'aiguille
+  const st = w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', '#ffd75e'] : lock ? ['VERROUILLÉE', '#8fa0b8'] : ok ? ['DIRECTION CORRECTE', '#7dff8a'] : ['MAUVAISE DIRECTION !', '#ff6b5b'];
+  if (w.fixT <= 0 || Math.floor(S.t * 4) % 2) txt(st[0], x + bw / 2, y + bh - 5, 8, st[1], 'center', 'VT323', bw - 6);
+}
+function xingSprites(w, list, yf) {
+  const NX = XZ, NZ = -XU;                                     // normale côté droit (tournée vers nous)
+  const dc = w.pos - S.pos; if (dc < NEAR + 4 || dc > DMAX) return;
+  // par tranches de 1 m (dessinées juste après le piédroit et le sol de la même tranche) :
+  // bouches des tunnels latéraux (gauche avant le croisement, droite après) et rails de la voie oblique
+  for (let z = w.pos - 6.5; z < w.pos + 6.5; z += 1) {
+    const d = z - S.pos; if (d < NEAR + 0.3) continue;
+    list.push({ d: d - 0.05, draw: () => {
+      const da = d, db = d + 1;
+      if (z + 1 <= w.pos - 0.5) poly([[-2.29, yf, db], [-2.29, 0.9, db], [-2.29, 0.9, da], [-2.29, yf, da]], '#020203');
+      if (z >= w.pos + 0.5) poly([[2.29, yf, db], [2.29, 0.9, db], [2.29, 0.9, da], [2.29, yf, da]], '#020203');
+      for (const o of [-0.72, 0.72]) {
+        const s0 = (z - (w.pos - 6) - NZ * o) / XZ, s1 = s0 + 1 / XZ;
+        const pa = Math.max(s0, X_IN), pb = Math.min(s1, X_OUT); if (pb <= pa) continue;
+        const p = (s, e) => { const [x, zz] = xPt(w, s); return [Math.max(-2.29, Math.min(2.29, x + NX * (o + e))), yf + 0.13, zz + NZ * (o + e) - S.pos]; };
+        poly([p(pa, -0.05), p(pb, -0.05), p(pb, 0.05), p(pa, 0.05)], sh(C.rail, 0.85));
+      }
+    } });
+  }
+  // phares qui éclairent la bouche gauche avant l'arrivée
+  if (w.t0 !== undefined) {
+    const sh0 = X_V * (S.clock - w.t0);
+    if (sh0 > -40 && sh0 < X_IN + 1) list.push({ d: dc - 3.5, draw: dd => { const [gx, gy] = P(-2.3, -1.2, dd); glow(gx, gy, Math.min(70, 3.4 * F / dd), '255,236,190', Math.min(0.5, 0.15 + 0.012 * (sh0 + 40)) + 0.08 * Math.sin(S.t * 20)); } });
+    // la rame qui traverse : vue de trois quarts arrière, coupée par les piédroits
+    const sH = Math.min(sh0, X_OUT), sT = Math.max(sh0 - X_LEN, X_IN);
+    if (sH > sT) {
+      const zn = Math.min(xPt(w, sT)[1] + NZ * 1.35, xPt(w, sT)[1] - NZ * 1.35);   // point le plus proche : la rame passe devant les bouches
+      list.push({ d: Math.max(NEAR + 0.4, zn - S.pos - 0.1), draw: () => {
+        const f = Math.min(1, 0.22 + 0.92 / (1 + (dc / 24) * (dc / 24)));
+        const Q = (s, o, y) => { const [x, z] = xPt(w, s); return [Math.max(-2.29, Math.min(2.29, x + NX * o)), y, z + NZ * o - S.pos]; };
+        const face = (s0, s1, o, y0, y1, col) => poly([Q(s0, o, y0), Q(s1, o, y0), Q(s1, o, y1), Q(s0, o, y1)], col);
+        const yb = -1.62, yt = 1.45;
+        face(sT, sH, 1.35, yb, yt, sh([196, 202, 212], f));                   // flanc
+        face(sT, sH, 1.35, yb, yb + 0.32, sh([46, 50, 58], f));
+        face(sT, sH, 1.35, yb + 0.32, yb + 0.4, sh([31, 95, 174], f));
+        for (let k = sh0 - X_LEN + 1.5; k < sh0 - 1; k += 3.2) {            // fenêtres éclairées
+          const a = Math.max(k, sT), b = Math.min(k + 2, sH); if (b > a) face(a, b, 1.36, 0.1, 1.05, sh([255, 226, 160], Math.max(0.5, f)));
+        }
+        const sRear = sh0 - X_LEN;
+        if (sRear >= X_IN && sRear <= X_OUT) {                                 // face arrière et feux rouges
+          const R = (o0, o1, y0, y1, col) => poly([Q(sRear, o0, y0), Q(sRear, o1, y0), Q(sRear, o1, y1), Q(sRear, o0, y1)], col);
+          R(-1.35, 1.35, yb, yt, sh([214, 220, 228], f)); R(-1.12, -0.32, 0.15, 1.15, sh([24, 32, 46], f)); R(0.32, 1.12, 0.15, 1.15, sh([24, 32, 46], f));
+          for (const o of [-0.85, 0.85]) { R(o - 0.16, o + 0.16, -0.95, -0.72, '#ff2a1a'); const q = Q(sRear, o, -0.83); const [lx, ly] = P(q[0], q[1], q[2]); glow(lx, ly, Math.min(60, 1.6 * F / q[2]), '255,40,20', 0.45); }
+        }
+        if (Math.abs(sH - X_SC) < 6 || Math.abs(sT - X_SC) < 6) { const [gx, gy] = P(0, yf + 0.1, dc); glow(gx, gy, Math.min(40, 2 * F / dc), '160,200,255', 0.12 * (Math.sin(S.t * 37) > 0.6 ? 1 : 0)); }   // étincelles au croisement
+      } });
+    }
   }
 }
 function swSprites(list) {
   const w = S.sw; if (!w) return;
   const yf = -2;
   // branche (rails qui divergent ou convergent) et bouche du tunnel annexe à droite
-  const z0 = w.kind === 'merge' ? w.pos - SW_LEN : w.pos;
-  for (let z = z0; z < z0 + SW_LEN; z += 2) {
+  const z0 = w.pos;
+  if (w.kind === 'fork') for (let z = z0; z < z0 + SW_LEN; z += 2) {
     const d = z - S.pos; if (d < NEAR + 0.3 || d > DMAX) continue;
     list.push({ d, draw: dd => {
       const a = swOff(w, z), b = swOff(w, z + 2); if (a === null || b === null) return;
@@ -1545,14 +1653,7 @@ function swSprites(list) {
     const rx = w.set === 'D' ? 0.62 : -0.62;
     poly([[rx - 0.03, yf + 0.13, d + 4], [rx + 0.03, yf + 0.13, d + 4], [rx + 0.03, yf + 0.13, d], [rx - 0.03, yf + 0.13, d]], '#e8ecf4');
   } });
-  // train de la branche (convergence) : il sort du tunnel annexe et passe devant
-  if (w.kind === 'merge' && w.eta !== null) {
-    const zt = w.pos + 11 * (S.clock - w.eta), x = zt < w.pos ? swOff(w, zt) : 0, d = zt - S.pos;
-    if (x !== null && x < 2.6 && d > NEAR + 0.5 && d < DMAX) list.push({ d, draw: dd => { g.save(); g.translate(x * F / dd, 0); drawLeaderTail(dd); g.restore(); } });
-    if (zt < w.pos - SW_LEN * 0.8 && w.pos - SW_LEN * 0.7 - S.pos > NEAR) {   // ses phares éclairent la bouche du tunnel
-      const dm = w.pos - SW_LEN * 0.75 - S.pos; list.push({ d: dm, draw: dd => { const [gx, gy] = P(2.3, -1.2, dd); glow(gx, gy, Math.min(60, 3 * F / dd), '255,236,190', 0.25 + 0.15 * Math.sin(S.t * 20)); } });
-    }
-  }
+  if (w.kind === 'merge') xingSprites(w, list, yf);
   // signaux : signal d'aiguille, et signal d'avertissement 110 m avant la convergence
   const sigs = [[w.sig, () => swRed() ? 'r' : 'g']];
   if (w.kind === 'merge') sigs.push([w.pos - 110, () => swRed() || w.eta === null ? 'y' : 'g']);
@@ -1633,6 +1734,20 @@ function finish() {
   S.missions.forEach(m => { if (m.state === 'pending') m.state = 'fail'; });
   S.starsWon = S.missions.filter(m => m.state === 'done').length; STARS += S.starsWon; saveBest();
   if (S.score > BEST) { S.newRecord = true; BEST = S.score; saveBest(); }
+  // médailles par catégorie
+  const arr = STATIONS.filter((st, i) => i > 0 && st.res.stars), nA = arr.length;
+  const punct = nA ? arr.filter(st => st.res.stars.t).length / nA : 0;
+  const sw = S.swN ? Math.max(0, 1 - (S.swBad || 0) / S.swN) : null;
+  const vy = 0.5 * (S.paxOffer ? S.pax / S.paxOffer : 1) + 0.5 * secPct() / 100;
+  S.cat = [catLevel(punct), catLevel(sw), catLevel(vy)]; S.catR = [punct, sw, vy];
+  const id = LN().id, best = loadCat(id);
+  S.catNew = S.cat.map((l, i) => l > best[i]);
+  const nb = best.map((b, i) => Math.max(b, S.cat[i]));
+  // classement des 5 meilleurs services de la ligne
+  const top = loadTop(id), now = new Date(), ent = { s: S.score, d: `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}`, m: S.cat, k: Date.now() };
+  top.push(ent); top.sort((a, b) => b.s - a.s); const t5 = top.slice(0, 5);
+  S.rankPos = t5.indexOf(ent) + 1;     // 0 : hors classement
+  try { localStorage.setItem('dm_top_' + id, JSON.stringify(t5)); localStorage.setItem('dm_cat_' + id, JSON.stringify(nb)); } catch (e) {}
 }
 
 function update(dt) {
@@ -1698,7 +1813,7 @@ function update(dt) {
   let a = 0;
   if (Z && (S.mg || S.rev)) { if (S.warnT <= 0) { msg(S.mg ? 'Terminez la manœuvre de l\'aiguille d\'abord' : 'Retour en marche arrière en cours…', '#ffb35e'); S.warnT = 2; } }
   else if (Z) {
-    if (S.phase === 'drive' && !S.ebrake) a += 1.7 - 0.6 * S.v / VMAX;   // traction : forte au démarrage, un peu moins à pleine vitesse
+    if (S.phase === 'drive' && !S.ebrake) a += 2.4 - 0.8 * S.v / VMAX;   // traction : forte au démarrage, un peu moins à pleine vitesse
     else if (S.warnT <= 0) { msg('Fermez d\'abord les portes !', '#ff6b5b'); S.warnT = 2; }
   }
   if (B) a -= BRAKE_MAX * S.brakeF;
@@ -3299,7 +3414,10 @@ function drawGauge() {
   if (S.phase !== 'drive' || S.next >= STATIONS.length) return;
   const st = STATIONS[S.next], dist = st.pos - S.pos;
   if (dist > CURVE_D || dist < -PE) return;
-  const bw = 176, bh = 62, bx = W / 2 - bw / 2, by = VIEW_H - bh - 4;
+  // la courbe glisse vers la droite quand une caméra intérieure occupe le bas gauche de l'écran
+  const camOpen = S.camAt !== undefined && S.t - S.camAt < 0.15;
+  S.gaugeX = S.gaugeX === undefined ? 0 : S.gaugeX + ((camOpen ? 1 : 0) - S.gaugeX) * 0.2;
+  const bw = 176, bh = 62, bx = Math.round(W / 2 - bw / 2 + S.gaugeX * (162 - (W / 2 - bw / 2))), by = VIEW_H - bh - 4;
   // la courbe s'efface entre 15 et 10 m : la finition se fait à l'œil (loupe + bips)
   const band = Math.max(0, Math.min(1, (dist - 10) / 5));
   drawCurve(bx, by + 11, bw, bh - 11, S.trace, band, dist);
@@ -3315,7 +3433,7 @@ function drawGauge() {
   if (label !== 'FREINEZ !' || Math.floor(S.t * 6) % 2) txt(label, bx + bw - 4, by + 9, 10, col, 'right', 'VT323', 70);
 }
 
-const centerX = () => W / 2;
+const centerX = () => S.mode === 'running' && S.phase !== 'drive' ? Math.round((131 + W - 4) / 2) : W / 2;   // à quai : à droite du plan de ligne
 // petit diagnostic de l'approche : où la trace sort de la zone idéale
 function curveVerdict(tr) {
   let fast = 0, slow = 0, re = 0, prevV = null;
@@ -3514,6 +3632,7 @@ function drawCabCam(sk) {
   else if (sk.type === 'slip' && sk.fallT <= 0) pop = Math.min(pop, Math.max(0, 1 - (sk.t - 6) * 5));
   else if (sk.type !== 'slip') pop = Math.min(pop, Math.max(0, 1 - (sk.t - CAM_WIN) * 5));   // trop tard : la fenêtre se ferme
   if (pop <= 0) return;
+  S.camAt = S.t;
   const K = 1.3, w = Math.round(112 * K * pop), h = Math.round(72 * K * pop), x0 = 8, y0 = VIEW_H - 8 - Math.round(72 * K);
   const flash = Math.floor(S.t * 4) % 2;
   g.fillStyle = '#0d0f14'; g.fillRect(x0 - 3, y0 - 3, w + 6, h + 6);
@@ -3711,14 +3830,35 @@ function drawMsgs() {
   const text = group.map(m => m.text).join('  ·  ');
   const a = Math.min(1, (last.life - last.t) * 2, last.t * 8);
   g.globalAlpha = a;
-  const maxW = W - 60;
+  // en conduite, le bandeau évite les panneaux affichés : caméra plafond (droite), train devant (centre), itinéraire (gauche)
+  let left = 30, right = W - 30, y0 = cctv ? CAM_Y0 + CAM_H - 5 : drive ? 40 : 14;
+  const fxOn = cctv && S.fx && S.fx.t < 5;
+  if (fxOn) { left = 131; right = W - 4; }   // bilan d'arrivée affiché : le bandeau passe au-dessus, sur les caméras
+  if (drive && S.phase === 'drive') {
+    const st = STATIONS[S.next], dz = st ? st.pos - S.pos : 99;
+    if (S.next < STATIONS.length && dz <= 15 && dz >= -PE) right = W - 172;
+    if (S.vperm * 3.6 < 66) y0 = 67;
+    const sw = S.sw; if (sw && sw.kind === 'fork' && !sw.passed && !S.rev && sw.pos >= S.pos && y0 > 48) left = 86;
+  }
+  const maxW = right - left;
   let size = 14; g.font = `${size}px VT323, monospace`;
-  while (size > 9 && g.measureText(text).width > maxW - 12) { size--; g.font = `${size}px VT323, monospace`; }
-  const w = Math.min(maxW, g.measureText(text).width + 12);
-  const cx = W / 2, y0 = cctv ? CAM_Y0 + CAM_H - 5 : drive ? 40 : 14;
-  g.fillStyle = 'rgba(6,8,14,0.82)'; g.fillRect(Math.round(cx - w / 2), y0, Math.round(w), 14);
-  g.fillStyle = last.col; g.fillRect(Math.round(cx - w / 2), y0, 2, 14);
-  txt(text, cx, y0 + 11, size, last.col, 'center', 'VT323', maxW - 12);
+  while (size > 10 && g.measureText(text).width > maxW - 12) { size--; g.font = `${size}px VT323, monospace`; }
+  // trop long même en petit : coupure en deux lignes équilibrées
+  let lines = [text];
+  if (g.measureText(text).width > maxW - 12) {
+    const words = text.split(' '); let best = null;
+    for (let i = 1; i < words.length; i++) {
+      const a = words.slice(0, i).join(' '), b = words.slice(i).join(' '), m = Math.max(g.measureText(a).width, g.measureText(b).width);
+      if (!best || m < best[0]) best = [m, a, b];
+    }
+    if (best) lines = [best[1], best[2]];
+  }
+  const w = Math.min(maxW, Math.max(...lines.map(l => g.measureText(l).width)) + 12), bh = 3 + 11 * lines.length;
+  if (fxOn) y0 = 52 - bh;
+  const cx = (left + right) / 2;
+  g.fillStyle = 'rgba(6,8,14,0.82)'; g.fillRect(Math.round(cx - w / 2), y0, Math.round(w), bh);
+  g.fillStyle = last.col; g.fillRect(Math.round(cx - w / 2), y0, 2, bh);
+  lines.forEach((l, i) => txt(l, cx, y0 + 11 + i * 11, size, last.col, 'center', 'VT323', maxW - 12));
   g.globalAlpha = 1;
 }
 
@@ -3769,7 +3909,7 @@ function drawHelp() {
     'V puis 1/2 : annonces (répartir, portes).',
     'Plan de ligne : voyageurs en attente ; moins',
     'de saturation = bonus en fin de service.',
-    'K : klaxon · E : aiguille en panne (à l\'arrêt).',
+    'K : klaxon · E : aiguille en panne · ← → : direction',
     'Espace : veille automatique (quand elle sonne).',
     'M : missions · H : louches · Échap : pause',
   ]);
@@ -3949,7 +4089,38 @@ function drawTitle() {
   g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.strokeRect(W / 2 - bw / 2 + 0.5, 160.5, bw - 1, 17);
   pixText(lab, W / 2, 173, 8, '#ffffff', null);
   txt('Un maximum de voyageurs, à l\'heure, arrêt pile sur la marque', W / 2, 192, 10, '#a8b2c6', 'center', 'VT323', W - 30);
-  txt('◄ ►  ligne      T  tutoriel      ?  aide      F  plein écran', W / 2, 207, 10, '#6f7a90', 'center');
+  txt('◄ ►  ligne    C  classement    T  tutoriel    ?  aide    F  plein écran', W / 2, 207, 10, '#6f7a90', 'center');
+  txt(VERSION, W - 4, 214, 8, '#4a5468', 'right');
+  if (TITLE.rank) drawRanking();
+}
+// classement local de la ligne choisie : 5 meilleurs services et meilleures médailles par catégorie
+function drawRanking() {
+  const Ln = LN(), top = loadTop(Ln.id), cat = loadCat(Ln.id);
+  const x = 62, y = 22, w = W - 124, h = 170;
+  g.fillStyle = 'rgba(4,6,12,0.96)'; g.fillRect(x, y, w, h);
+  g.strokeStyle = Ln.col; g.lineWidth = 1.5; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  g.fillStyle = Ln.col; g.fillRect(x, y, w, 16);
+  pixText(`CLASSEMENT · LIGNE ${Ln.num}`, x + w / 2, y + 12, 8, Ln.fg, null);
+  txt('Rang', x + 12, y + 30, 10, '#8fa0b8'); txt('Score', x + 44, y + 30, 10, '#8fa0b8'); txt('Médaille', x + 92, y + 30, 10, '#8fa0b8');
+  ['Pon.', 'Aig.', 'Voy.'].forEach((l, j) => txt(l, x + 160 + j * 22, y + 30, 10, '#8fa0b8', 'center')); txt('Date', x + w - 12, y + 30, 10, '#8fa0b8', 'right');
+  for (let i = 0; i < 5; i++) {
+    const e = top[i], yy = y + 44 + i * 13, rc = ['#ffd75e', '#c8d0dc', '#d08a4a', '#8fa0b8', '#8fa0b8'][i];
+    g.fillStyle = i % 2 ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)'; g.fillRect(x + 6, yy - 9, w - 12, 12);
+    txt(`${i + 1}.`, x + 14, yy, 11, rc);
+    if (!e) { txt('—', x + 44, yy, 11, '#4a5468'); continue; }
+    txt(String(e.s), x + 44, yy, 11, '#ffffff');
+    const md = medalOf(e.s); if (md) { medalDot(x + 96, yy - 3, MEDALS.indexOf(md) + 1, 3.5); txt(md[1], x + 103, yy, 10, md[2]); } else txt('—', x + 96, yy, 10, '#4a5468');
+    (e.m || []).forEach((lv, j) => medalDot(x + 160 + j * 22, yy - 3, lv, 3.5));
+    txt(e.d || '', x + w - 12, yy, 10, '#8fa0b8', 'right');
+  }
+  txt('MEILLEURES MÉDAILLES PAR CATÉGORIE', x + w / 2, y + 120, 10, '#8fa0b8', 'center');
+  CAT.forEach((c, i) => {
+    const cx = x + 18 + i * 86, lv = cat[i];
+    medalDot(cx, y + 133, lv, 5);
+    txt(c[0], cx + 9, y + 132, 10, '#e6ecf5'); txt(lv ? LVL[lv][0] : 'à gagner', cx + 9, y + 142, 10, lv ? LVL[lv][1] : '#4a5468');
+  });
+  txt('Seuils : bronze 50 % · argent 75 % · or 95 %', x + w / 2, y + 156, 10, '#6f7a90', 'center', 'VT323', w - 12);
+  txt('C ou Échap : fermer', x + w / 2, y + 166, 9, '#a8b2c6', 'center');
 }
 
 function drawEnd() {
@@ -3989,8 +4160,13 @@ function drawEnd() {
   const pil = [['la précision', cnt('p') / nArr], ['la ponctualité', cnt('t') / nArr], ['le remplissage', cnt('v') / nDep], ['la sécurité', secPct() / 100]];
   const weak = pil.reduce((a, b) => b[1] < a[1] ? b : a);
   const totStars = cnt('p') + cnt('t') + cnt('v');
-  txt(`★ ${totStars} étoiles  ·  🛡 Sécurité ${secPct()} %  ·  Point faible : ${weak[0]}`, W / 2, 163, 12, '#e6ecf5', 'center', 'VT323', W - 16);
-  txt(`Voyageurs : ${S.pax} / ${S.paxOffer}  ·  bonus trafic fluide +${S.trafBonus}`, W / 2, 175, 12, '#9fe0ff', 'center', 'VT323', W - 16);
+  txt(`★ ${totStars} étoiles  ·  🛡 ${secPct()} %  ·  voyageurs ${S.pax}/${S.paxOffer}  ·  trafic +${S.trafBonus}  ·  point faible : ${weak[0]}`, W / 2, 163, 11, '#e6ecf5', 'center', 'VT323', W - 16);
+  if (S.cat) CAT.forEach((c, i) => {      // médailles par catégorie
+    const cx = 34 + i * 118, lv = S.cat[i], blink = S.catNew[i] && lv > 0 && Math.floor(S.t * 4) % 2;
+    medalDot(cx, 172, lv);
+    txt(c[0], cx + 7, 175, 10, '#8fa0b8');
+    txt(lv < 0 ? 'aucun' : lv ? LVL[lv][0] + (S.catNew[i] ? ' !' : '') : `${Math.round(S.catR[i] * 100)} %`, cx + 7 + 58, 175, 10, blink ? '#ffffff' : lv > 0 ? LVL[lv][1] : '#6f7a90');
+  });
   const med = medalOf(S.score);
   if (med) {   // médaille avec ruban
     const mx = W / 2 - 100;
@@ -4001,6 +4177,7 @@ function drawEnd() {
   }
   txt(`SCORE : ${S.score}`, W / 2 + (med ? 26 : 0), 190, 17, '#ffd75e', 'center');
   if (S.newRecord) { if (Math.floor(S.t * 4) % 2) txt('NOUVEAU RECORD !', W / 2, 201, 13, '#7dff8a', 'center'); }
+  else if (S.rankPos) txt(`${S.rankPos}e meilleur service de la ligne  ·  record : ${BEST}  ·  +${S.starsWon || 0} missions`, W / 2, 201, 12, '#7dff8a', 'center', 'VT323', W - 16);
   else { const nm = nextMedal(S.score); txt(`Record : ${BEST}  ·  ${med ? 'médaille ' + med[1].toLowerCase() : 'pas de médaille'}${nm ? `  ·  ${nm[1].toLowerCase()} à ${nm[0]}` : ''}  ·  +${S.starsWon || 0} missions`, W / 2, 201, 12, '#cfd6e6', 'center', 'VT323', W - 16); }
 
   if (Math.floor(S.t * 2) % 2) txt('ENTREE OU R POUR REJOUER', W / 2, 211, 8, '#ffffff', 'center', '"Press Start 2P"');
