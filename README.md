@@ -25,16 +25,25 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 | **Entrée** | Fermer les portes |
 | **Espace** | Veille automatique (quand elle sonne) |
 | **K** | Klaxon |
-| **A** | Radio / alarme |
+| **A** | Radio / alarme (aiguille mal tracée, incidents à bord) |
+| **E** | Descendre manœuvrer une aiguille en panne |
 | **V** | Annonces voyageurs |
 | **M** | Missions |
 | **?** | Aide (jeu en pause) |
 | **F** | Plein écran |
+| **Échap** | Pause (Q pour quitter la partie) |
+
+## Aiguillages
+
+- **Bifurcation** : le PCC annonce l'itinéraire (direct ou dévié). Vérifiez l'indicateur ; s'il est faux, prévenez le PCC (**A**) avant l'aiguille, sinon c'est le retour en marche arrière.
+- **Voie déviée** : 30 km/h sur l'aiguille, annoncé par un panneau jaune.
+- **Convergence** : un train arrive de l'autre branche. Au signal jaune, ralentissez pour arriver quand le signal passe au vert (bonus si vous ne vous arrêtez pas).
+- **Aiguille en panne** : arrêtez-vous avant le signal, descendez (**E**), marchez jusqu'au levier et calez l'aiguille en rythme (**Espace**).
 
 ## Fin de partie
 
 - voyageur percuté sur la voie ;
-- déraillement : plus de 20 km/h au-dessus d'une limitation de vitesse (travaux) ;
+- déraillement : plus de 20 km/h au-dessus d'une limitation de vitesse (travaux, voie déviée) ;
 - collision avec le train qui vous précède ;
 - 3 arrêts ratés ;
 - trafic de la ligne saturé à 100 %.

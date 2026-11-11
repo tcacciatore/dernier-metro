@@ -407,7 +407,22 @@ function sfxDoorsClosing() {
   noise(0.35, 0.2, 'bandpass', 1200, 1.5, 0.05);
   const sl = noise(1.25, 0.16, 'bandpass', 420, 1.2, 0.1, 0.15); // glissement des vantaux
   if (sl) sl.frequency.linearRampToValueAtTime(260, AC.currentTime + 1.3);
-  for (let i = 0; i < 5; i++) beep(1650, 0.09, 'square', 0.03, 0.05 + i * 0.24); // bips de fermeture
+  sfxDoorMelody();
+}
+// petite mélodie de fermeture des portes : carillon de trois notes descendantes, puis des bips doux
+function bell(f, t, vol, dur = 0.9) {
+  [[1, vol], [2.01, vol * 0.35], [3.0, vol * 0.12]].forEach(([m, v]) => {
+    const o = AC.createOscillator(), gn = AC.createGain();
+    o.type = 'sine'; o.frequency.value = f * m;
+    gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(v, t + 0.012); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur / m);
+    o.connect(gn).connect(AC.destination); o.start(t); o.stop(t + dur + 0.05);
+  });
+}
+function sfxDoorMelody() {
+  if (!AC) return;
+  const t = AC.currentTime + 0.02;
+  [[1175, 0], [988, 0.2], [784, 0.4], [988, 0.6]].forEach(([f, dt], i) => bell(f, t + dt, i === 3 ? 0.05 : 0.07, i === 3 ? 0.6 : 0.9));
+  for (let i = 0; i < 3; i++) beep(1480, 0.06, 'sine', 0.025, 0.9 + i * 0.16);
 }
 const sfxDoor = () => {                                       // "ba-dam" des vantaux + verrouillage
   beep(85, 0.3, 'triangle', 0.35); noise(0.12, 0.45, 'lowpass', 900, 0.8);
@@ -521,12 +536,17 @@ function doAnnonce(n) {
 // appel radio : diffusé dans toute la rame
 function radioCall() {
   beep(1400, 0.05, 'square', 0.04); noise(0.3, 0.08, 'bandpass', 1800, 2);
-  if (S.malaise && S.malaise.shown && !S.malaise.called) {
-    S.malaise.called = true; S.score += 30;
+  const sw = S.sw;
+  if (sw && sw.kind === 'fork' && !sw.passed && !S.rev && sw.set !== sw.want && sw.fixT <= 0 && S.phase === 'drive') {
+    sw.fixT = SW_FIX; sw.called = true; S.score += 30;
+    msg('Radio : « Aiguille mal tracée ! » Le PCC la retrace, signal fermé (+30)', '#7dff8a', 3.5); return;
+  }
+  if (S.malaise && S.malaise.shown && !S.malaise.called && !S.malaise.expired) {
+    S.malaise.called = true; S.malaise.calledAt = S.malaise.t; S.score += 30;
     msg(`Radio : PCC prévenu, les secours attendent à ${STATIONS[S.next].name} (+30)`, '#7dff8a', 3.5); return;
   }
   const cb = S.cab;
-  if (cb && cb.shown && !cb.called && cb.type !== 'slip' && S.phase === 'drive' && S.next < STATIONS.length) {
+  if (cb && cb.shown && !cb.called && !cb.expired && cb.type !== 'slip' && S.phase === 'drive' && S.next < STATIONS.length) {
     cb.called = true; cb.calledAt = cb.t; const nn = STATIONS[S.next].name, v = `V${cb.car + 1}`;
     const [pts, txt0] = {
       sick: [20, `Radio : agent de nettoyage à ${nn}, la ${v} y sera fermée à la montée`],
@@ -536,7 +556,7 @@ function radioCall() {
     }[cb.type];
     S.score += pts; msg(`${txt0} (+${pts})`, '#7dff8a', 4); return;
   }
-  if (S.theft && S.theft.shown && S.phase === 'drive') {      // alarme tirée pour le vol en cours
+  if (S.theft && S.theft.shown && !S.theft.expired && S.phase === 'drive') {      // alarme tirée pour le vol en cours
     S.suspects.forEach(x => x.pending = true); S.theft = null; S.score += 40;
     for (let i = 0; i < 4; i++) beep(i % 2 ? 660 : 990, 0.15, 'sawtooth', 0.05, i * 0.16);
     msg('Alarme donnée : le voleur sera arrêté à la prochaine station (+40)', '#7dff8a', 3.5); return;
@@ -650,6 +670,11 @@ addEventListener('keydown', e => {
   }
   if ((e.key === '?' || k === 'f1') && !e.repeat) { e.preventDefault(); S.help = !S.help; return; }
   if (S.help) { if (k === 'escape' || k === 'enter') S.help = false; return; }
+  if (S.paused) {
+    if (k === 'escape' || k === 'enter' || k === ' ') setPause(false);
+    else if (k === 'q') { setPause(false); stopMusic(); reset('title'); TITLE.stage = 1; TITLE.t = 0.5; }
+    return;
+  }
   keys[k] = true;
   initAudio(); if (AC && AC.state === 'suspended') AC.resume();
   if (S.mode === 'title') {
@@ -668,6 +693,8 @@ addEventListener('keydown', e => {
     else { S.rConfirm = S.t + 2.5; msg('Recommencer ? Appuyez encore sur R', '#ffb35e', 2.5); }
     return;
   }
+  if (S.mg && k !== 'escape') { if (k === ' ' && !e.repeat) mgHit(); return; }
+  if (k === 'e' && !e.repeat && S.mode === 'running') { if (canManual()) startManual(); else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') msg(S.v > 0 ? 'Arrêtez d\'abord la rame' : 'Approchez-vous du signal de l\'aiguille', '#ffd75e', 2); return; }
   if (k === ' ') { vacmaAck(); return; }
   if (k === 'k') {
     sfxHorn(); S.hornT = 0.7;
@@ -684,7 +711,7 @@ addEventListener('keydown', e => {
   if (k === 'v') { S.radio = 0; S.annonce = S.annonce ? 0 : 5; if (S.annonce) beep(900, 0.05, 'sine', 0.04); return; }
   if (S.annonce && (k === '1' || k === '2')) { doAnnonce(+k); return; }
   if (k === 'a') { S.annonce = 0; radioCall(); return; }
-  if (k === 'escape') { S.radio = 0; S.annonce = 0; return; }
+  if (k === 'escape') { if (S.radio || S.annonce) { S.radio = 0; S.annonce = 0; } else if (S.mode === 'running' && !S.over) setPause(true); return; }
   if (k === 'm') { S.missionShow = 5; return; }
   if (k === 'p') {
     if ((S.phase === 'dwell') && S.endT < 0) {
@@ -704,6 +731,24 @@ cv.addEventListener('click', () => {
   cv.focus(); initAudio(); if (AC && AC.state === 'suspended') AC.resume();
   if (S.mode === 'title') { if (TITLE.stage === 0) titleGo(); else startService(false); }
 });
+// pause : Échap, ou automatiquement quand la fenêtre perd le focus
+function setPause(on) {
+  if (on && (S.mode !== 'running' || S.over || S.paused)) return;
+  S.paused = on;
+  for (const k in keys) keys[k] = false;
+  try { on ? speechSynthesis.pause() : speechSynthesis.resume(); } catch (e) {}
+  if (on && AC) [motorGain, squealGain, rumbleGain, hissGain, whineGain, crowdGain].forEach(gn => gn && gn.gain.setTargetAtTime(0, AC.currentTime, 0.05));
+  beep(on ? 440 : 660, 0.07, 'square', 0.04);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) setPause(true); });
+window.addEventListener('blur', () => setPause(true));
+function drawPause() {
+  g.fillStyle = 'rgba(4,6,12,0.78)'; g.fillRect(0, 0, W, H);
+  pixText('PAUSE', W / 2, 84, 22, '#ffd75e');
+  txt('Échap ou Entrée : reprendre', W / 2, 110, 12, '#ffffff', 'center');
+  txt('Q : quitter la partie (retour à l\'accueil)', W / 2, 124, 12, '#a8b2c6', 'center');
+  txt('?  aide et commandes', W / 2, 146, 10, '#6f7a90', 'center');
+}
 function startService(tuto) {
   stopMusic();
   S.mode = 'running'; S.pos = 0; S.v = 0; msg(`Ligne ${LN().num} · ${STATIONS[0].name} — en voiture !`, '#ffd75e');
@@ -757,6 +802,7 @@ function arrive(st, err) {
     setTimeout(() => msg(`🚑 Secours à bord de la V${S.medicCar + 1} : intervention ${extra} s${S.malaise ? '' : ''}`, '#ff8a7a', 4), 900);
   }
   S.malaise = null;
+  if (S.dirtyKeep && --S.dirtyLeft <= 0) { S.dirtyKeep = false; setTimeout(() => msg(`V${S.dirtyCar + 1} enfin nettoyée`, '#7dff8a', 3), 900); S.dirtyCar = -1; }
   const cb = S.cab, cbExtra = [];
   if (cb && cb.shown && cb.type === 'fight') {
     if (cb.called) setTimeout(() => msg(`🛡 La sécurité sépare les voyageurs de la V${cb.car + 1}`, '#7dff8a', 3.5), 900);
@@ -785,7 +831,7 @@ function arrive(st, err) {
   if (cb && cb.shown && cb.type === 'sick') {
     const c = cb.car; S.dirtyCar = c;
     if (cb.called) { S.dirtyKeep = false; S.cleanT = 8; setTimeout(() => msg(`🧹 Nettoyage de la V${c + 1} : personne n'y monte pendant 8 s`, '#ffd75e', 4), 900); }
-    else { S.dirtyKeep = true; pen(-40, 'Voyageur malade non signalé'); setTimeout(() => msg(`V${c + 1} souillée et jamais nettoyée : plus personne n'y monte jusqu'au terminus`, '#ff6b5b', 5), 900); }
+    else { S.dirtyKeep = true; S.dirtyLeft = 2; pen(-40, 'Voyageur malade non signalé'); setTimeout(() => msg(`V${c + 1} souillée : personne n'y monte pendant 2 stations`, '#ff6b5b', 5), 900); }
   }
   S.cab = null;
   st.served = true; setupMirror(st); st.people = [];
@@ -1037,8 +1083,15 @@ function drawHint() {
   else if (S.person && S.person.state === 'track' && S.person.seen) hint = 'PERSONNE SUR LA VOIE : freinez jusqu\'à l\'arrêt ou klaxonnez (K)';
   else if (S.cab && S.cab.shown && S.phase === 'drive' && S.cab.type === 'slip') hint = `SOL GLISSANT en V${S.cab.car + 1} : freinez en douceur, par petites touches sur S`;
   else if (S.cab && S.cab.shown && !S.cab.called && S.phase === 'drive') hint = { sick: 'VOYAGEUR MALADE', fight: 'BAGARRE', bag: 'BAGAGE ABANDONNÉ', vendor: 'VENDEUR À LA SAUVETTE' }[S.cab.type] + ` en V${S.cab.car + 1} : ` + { sick: 'A pour prévenir le PCC', fight: 'A pour appeler la sécurité', bag: 'A pour le signaler', vendor: 'A pour faire une annonce' }[S.cab.type];
-  else if (S.malaise && S.malaise.shown) hint = `MALAISE en V${S.malaise.car + 1} : arrêt obligatoire à ${STATIONS[S.next].name}${S.malaise.called ? '' : ' — A : prévenir le PCC'}`;
+  else if (S.malaise && S.malaise.shown) hint = `MALAISE en V${S.malaise.car + 1} : arrêt obligatoire à ${STATIONS[S.next].name}${S.malaise.called || S.malaise.expired ? '' : ' — A : prévenir le PCC'}`;
   else if (S.phase === 'drive' && STATIONS[S.next] && STATIONS[S.next].closed) hint = `${STATIONS[S.next].name} FERMÉE : traversez sans arrêt, 30 km/h max`;
+  else if (S.mg) hint = '';
+  else if (S.rev) hint = 'MAUVAIS ITINÉRAIRE : retour en marche arrière';
+  else if (canManual()) hint = 'E : descendre sur la voie pour manœuvrer l\'aiguille';
+  else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') hint = `AIGUILLE EN PANNE à ${Math.max(0, Math.round(S.sw.sig - S.pos))} m : arrêtez-vous avant le signal rouge`;
+  else if (S.sw && S.sw.kind === 'merge' && swRed() && S.phase === 'drive') hint = 'SIGNAL JAUNE : convergence, préparez-vous à l\'arrêt au signal (ou arrivez quand il passe au vert)';
+  else if (S.sw && S.sw.kind === 'fork' && S.sw.limOn) hint = S.v * 3.6 > 31 ? `VOIE DÉVIÉE : 30 km/h ! Déraillement au-delà de ${30 + DERAIL}` : 'VOIE DÉVIÉE : 30 km/h sur l\'aiguille';
+  else if (S.sw && S.sw.kind === 'fork' && !S.sw.passed && S.sw.pos - S.pos < 130 && S.phase === 'drive') hint = `BIFURCATION : prévu ${S.sw.want === 'D' ? 'DIRECT' : 'DÉVIÉ'} — l'indicateur montre ${S.sw.fixT > 0 ? '…' : S.sw.set === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Faux ? A`;
   else if (S.blackout) hint = 'COUPURE D\'ÉCLAIRAGE : suivez la courbe, les panneaux 50 / 25 / 10 et les bips';
   else if (S.sigRed > 0) hint = 'Signal rouge : attendez le vert';
   else if (S.limit && S.v * 3.6 > S.limit + 1) hint = `TROP VITE ! Au-delà de ${S.limit + DERAIL} km/h, la rame déraille : freinez (S)`;
@@ -1066,7 +1119,7 @@ function drawSchedChip() {
 
 // ---------- Veille automatique (VACMA) : prouver régulièrement qu'on est vigilant ----------
 function updateVacma(dt) {
-  if (S.phase !== 'drive' || S.v < 1 || S.ebrake) { if (S.phase !== 'drive') S.vacAlert = 0; return; }
+  if (S.phase !== 'drive' || S.v < 1 || S.ebrake || S.mg || S.rev) { if (S.phase !== 'drive') S.vacAlert = 0; return; }
   if (S.vacAlert > 0) {
     S.vacAlert -= dt; S.vacBeep -= dt;
     if (S.vacBeep <= 0) { beep(1040, 0.12, 'square', 0.05); S.vacBeep = 0.4; }
@@ -1113,7 +1166,7 @@ function startLeg() {
   S.theft = null;
   const sus = S.suspects.find(x => !x.pending);
   if (sus) S.theft = { car: sus.car, at: S.clock + 2 + Math.random() * 4, shown: false };
-  S.inc = null; S.limit = 0; S.sigRed = 0; S.sigPos = null; S.alarm = null; S.overT = 0;
+  S.inc = null; S.limit = 0; S.sigRed = 0; S.sigPos = null; S.alarm = null; S.overT = 0; S.sw = null; S.mg = null; S.rev = null;
   if (S.next >= STATIONS.length) return;
   S.person = null; S.dog = null; S.blackout = 0; S.malaise = null; S.cab = null;
   if (!S.dirtyKeep) S.dirtyCar = -1;
@@ -1121,7 +1174,7 @@ function startLeg() {
   const D = n.pos - cur.pos, last = S.next === STATIONS.length - 1;
   let text = '', add = 0, col = '#ffb35e';
   if (r < 0.07) { S.inc = 'signal'; S.sigPos = cur.pos + 16; S.sigRed = 5 + Math.random() * 5; add = Math.ceil(S.sigRed) - 1; text = 'INCIDENT : signal rouge en sortie de station'; }
-  else if (r < 0.14) { S.inc = 'limit'; S.limit = 30; add = 8; text = 'INCIDENT : travaux, vitesse limitée à 30 km/h'; }
+  else if (r < 0.14) { S.inc = 'limit'; S.limit = 30; S.limitT = S.limitT0 = 18; add = 8; text = 'INCIDENT : travaux, vitesse limitée à 30 km/h'; }
   else if (r < 0.21) {
     S.inc = 'crowd'; n.crowd = true; text = `INCIDENT : quai bondé à ${n.name}`;
     const cnt = 26 + Math.floor(Math.random() * 9);
@@ -1142,7 +1195,8 @@ function startLeg() {
     beep(1400, 0.05, 'square', 0.04); noise(0.4, 0.08, 'bandpass', 1800, 2);
   }
   else if (r < 0.60) {           // 5. malaise voyageur : arrêt obligatoire et intervention des secours
-    S.inc = 'malaise'; S.malaise = { car: Math.floor(Math.random() * 5), at: S.clock + 4 + Math.random() * 6, shown: false, called: false };
+    S.inc = 'malaise'; S.malaise = { type: 'malaise', car: Math.floor(Math.random() * 5), at: S.clock + 4 + Math.random() * 6, shown: false, called: false, t: 0,
+      look: mkPerson(0, 0), look2: mkPerson(0, 0), side: [mkPerson(0, 0), mkPerson(0, 0)], falls: 0, fallT: 0 };
   }
   else if (r < 0.70) {           // 7. coupure d'éclairage dans le tunnel
     S.inc = 'blackout'; S.blackout = 1; S.blackT = 0;
@@ -1153,9 +1207,10 @@ function startLeg() {
     S.dog = { pos: cur.pos + D * (0.3 + Math.random() * 0.2), x: (Math.random() - 0.5) * 0.6, state: 'sit', seen: false, hit: false,
       walk: 0, stT: 1.5, runT: 0, horns: 0, wag: 0, col: pick(['#8a5a2a', '#2a2420', '#c8a060', '#e8e0d0', '#6a6a6a']) };
   }
+  planSwitch(cur, n, D, L);
   if (text) msg(text, col, 5);   // le temps perdu n'est pas rendu : il faudra le rattraper
   // incidents à bord (vus sur la caméra intérieure), tirés à part : ils s'ajoutent aux incidents de voie
-  if (Math.random() < Math.min(0.65, 0.2 + 0.5 * L.inc)) {
+  if (!S.malaise && Math.random() < Math.min(0.65, 0.2 + 0.5 * L.inc)) {
     const types = ['sick', 'fight', 'bag', 'slip', 'vendor'].filter(t => t !== 'sick' || S.dirtyCar < 0);
     S.cab = { type: pick(types), car: Math.floor(Math.random() * 5), at: S.clock + 3 + Math.random() * 6, shown: false, called: false, t: 0,
       look: mkPerson(0, 0), look2: mkPerson(0, 0), side: [mkPerson(0, 0), mkPerson(0, 0)], falls: 0, fallT: 0, hardT: 0 };
@@ -1215,6 +1270,7 @@ function updateEvents(dt) {
   if (ml && !ml.shown && S.clock >= ml.at) {
     ml.shown = true;
     msg(`📞 Interphone V${ml.car + 1} : malaise voyageur ! Arrêt obligatoire à ${STATIONS[S.next].name}. A : prévenir le PCC`, '#ff6b5b', 6);
+    ml.t = 0;
     for (let i = 0; i < 4; i++) beep(i % 2 ? 700 : 900, 0.15, 'sine', 0.05, i * 0.2);
   }
   const sk = S.cab;
@@ -1229,14 +1285,315 @@ function updateEvents(dt) {
     }[sk.type], '#ff6b5b', 6);
     for (let i = 0; i < 4; i++) beep(i % 2 ? 700 : 900, 0.15, 'sine', 0.05, i * 0.2);
   }
+  if (ml && ml.shown) {
+    ml.t += dt;
+    if (!ml.called && !ml.expired && ml.t > CAM_WIN) { ml.expired = true; msg('Trop tard pour prévenir : les secours mettront plus longtemps', '#ff8a7a', 3); }
+  }
   if (sk && sk.shown) {
     sk.t += dt; sk.fallT = Math.max(0, sk.fallT - dt);
-    if (sk.type === 'slip') {   // freinage appuyé trop longtemps (ou d'urgence) : un voyageur tombe
+    if (!sk.called && !sk.expired && sk.type !== 'slip' && sk.t > CAM_WIN) { sk.expired = true; msg(`Trop tard : incident en V${sk.car + 1} non traité`, '#ff8a7a', 3); }
+    if (sk.type === 'slip' && sk.t > SLIP_T) { if (!sk.dry) { sk.dry = true; msg(`Sol sec en V${sk.car + 1} : freinez normalement`, '#7dff8a', 2.5); } }
+    else if (sk.type === 'slip') {   // freinage appuyé trop longtemps (ou d'urgence) : un voyageur tombe
       sk.hardT = (S.brakeF >= 0.95 || S.ebrake) && S.v > 1 ? sk.hardT + dt : 0;
       if (sk.hardT > 0.35 && sk.fallT <= 0) { sk.falls++; sk.fallT = 2.5; sk.hardT = 0; pen(-15, `Voyageur tombé en V${sk.car + 1} : freinage trop brusque`); noise(0.2, 0.2, 'lowpass', 400, 0.6); }
     }
   }
-  if (S.blackout) S.blackT += dt;
+  if (S.blackout) { S.blackT += dt; if (S.blackT > BLACK_T) { S.blackout = 0; msg('Éclairage rétabli', '#7dff8a', 2); } }
+  if (S.limit && S.inc === 'limit') { S.limitT -= dt; if (S.limitT <= 0) { S.limit = 0; S.inc = null; msg('Fin de la zone de travaux', '#7dff8a', 2); } }
+  const dgg = S.dog;
+  if (dgg && dgg.seen && ['sit', 'trot', 'run'].includes(dgg.state)) { dgg.t = (dgg.t || 0) + dt; if (dgg.t > DOG_T) { dgg.state = 'leaving'; msg('Le chien quitte la voie de lui-même', '#9fe0ff', 2.5); } }
+  const pee = S.person;
+  if (pee && pee.seen && pee.state === 'track') { pee.t = (pee.t || 0) + dt; if (pee.t > PERSON_T) { pee.state = 'leaving'; msg('La personne quitte la voie', '#9fe0ff', 2.5); } }
+}
+const BLACK_T = 15, DOG_T = 16, PERSON_T = 12;
+// incidents en cours : une étiquette par incident, avec une barre qui se vide jusqu'à sa fin
+function drawIncidentBars() {
+  if (S.mode !== 'running' || S.phase !== 'drive' || S.over || S.mg) return;
+  const L = [], sk = S.cab, ml = S.malaise, th = S.theft, dg = S.dog, pe = S.person;
+  const NAME = { sick: 'MALADE', fight: 'BAGARRE', bag: 'BAGAGE', vendor: 'VENDEUR', slip: 'SOL GLISSANT' };
+  if (ml && ml.shown && !ml.called && !ml.expired) L.push([`MALAISE V${ml.car + 1} · A`, 1 - ml.t / CAM_WIN, '#ff6b5b']);
+  if (sk && sk.shown && sk.type === 'slip' && !sk.dry) L.push([`SOL GLISSANT V${sk.car + 1}`, 1 - sk.t / SLIP_T, '#ffb35e']);
+  else if (sk && sk.shown && !sk.called && !sk.expired) L.push([`${NAME[sk.type]} V${sk.car + 1} · A`, 1 - sk.t / CAM_WIN, '#ff6b5b']);
+  if (th && th.shown && !th.expired) L.push([`VOL V${th.car + 1} · A`, 1 - th.t / CAM_WIN, '#ff6b5b']);
+  if (S.limit && S.inc === 'limit') L.push([`TRAVAUX ${S.limit} km/h`, S.limitT / S.limitT0, '#ffb35e']);
+  if (S.blackout) L.push(['COUPURE D\'ÉCLAIRAGE', 1 - S.blackT / BLACK_T, '#9fb3d8']);
+  if (S.sigRed > 0) L.push(['SIGNAL ROUGE', Math.min(1, S.sigRed / 10), '#ff4a3a']);
+  if (dg && dg.seen && ['sit', 'trot', 'run'].includes(dg.state)) L.push(['CHIEN SUR LA VOIE · K', 1 - (dg.t || 0) / DOG_T, '#ffb35e']);
+  if (pe && pe.seen && pe.state === 'track') L.push(['PERSONNE SUR LA VOIE · K', 1 - (pe.t || 0) / PERSON_T, '#ff4a3a']);
+  const w = S.sw;
+  if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / SW_FIX, '#ffd75e'] : [`BIFURCATION · ${w.want === 'D' ? 'DIRECT' : 'DÉVIÉ 30'}`, (w.pos - S.pos) / w.d0, '#9fe0ff']);
+  if (w && w.kind === 'merge' && w.eta !== null && swRed()) L.push(['CONVERGENCE · cédez', (w.eta + 0.8 - S.clock) / (w.eta + 0.8 - w.start), '#ffd75e']);
+  if (w && w.kind === 'manual' && !w.done) L.push([S.mg ? 'MANŒUVRE EN COURS' : 'AIGUILLE EN PANNE · E', S.mg ? 1 - S.mg.hits / 3 : Math.max(0, (w.sig - S.pos) / w.d0), '#ff8a5b']);
+  const st = STATIONS[S.next], dz = st ? st.pos - S.pos : 99, top = dz <= 15 && dz >= -PE ? 80 : 6;   // sous le zoom d'arrêt s'il est affiché
+  L.forEach(([lab, fr, col], i) => {
+    const w = 112, h = 13, x = W - 6 - w, y = top + i * 15;
+    g.fillStyle = 'rgba(6,8,14,0.86)'; g.fillRect(x, y, w, h);
+    g.fillStyle = col; g.fillRect(x, y, 2, h);
+    txt(lab, x + 5, y + 8.5, 10, '#ffffff', 'left', 'VT323', w - 8);
+    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x + 4, y + h - 3, w - 6, 2);
+    g.fillStyle = fr < 0.3 ? '#ff4a3a' : col; g.fillRect(x + 4, y + h - 3, (w - 6) * Math.max(0, Math.min(1, fr)), 2);
+  });
+}
+// ---------- Aiguillages : bifurcation, voie déviée, convergence, manœuvre manuelle ----------
+const SW_LEN = 34, SW_SIG = 8, SW_DEV = 30, SW_FIX = 4;   // longueur de la branche visible, signal 8 m avant l'aiguille
+const swOff = (w, z) => {                                 // décalage latéral (vers la droite) de la branche au point z
+  const u = w.kind === 'merge' ? (w.pos - z) / SW_LEN : (z - w.pos) / SW_LEN;
+  return u < 0 || u > 1 ? null : 3.6 * Math.pow(u, 1.15);
+};
+function swRed() {
+  const w = S.sw; if (!w) return false;
+  if (w.kind === 'manual') return !w.done;
+  if (w.kind === 'fork') return w.fixT > 0;
+  return w.eta !== null && S.clock < w.eta + 0.8;
+}
+function planSwitch(cur, n, D, L) {
+  S.sw = null; S.mg = null; S.rev = null;
+  if (S.inc && S.inc !== 'crowd' && S.inc !== 'pcc') return;
+  if (D < 260 || Math.random() > Math.min(0.6, 0.25 + 0.3 * L.inc)) return;
+  const kind = wpick({ fork: 0.45, merge: 0.35, manual: 0.2 });
+  const pos = cur.pos + PE + 60 + Math.random() * (D - PL - PE - 140);
+  const w = S.sw = { kind, pos, sig: pos - SW_SIG, d0: pos - cur.pos, want: 'D', set: 'D', fixT: 0, called: false, passed: false, sigPassed: false, eta: null, start: 0, stopped: false, done: false, limOn: false };
+  const dist = Math.round((pos - cur.pos) / 10) * 10;
+  if (kind === 'fork') {
+    w.want = Math.random() < 0.4 ? 'G' : 'D';
+    w.set = Math.random() < 0.4 ? (w.want === 'D' ? 'G' : 'D') : w.want;
+    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : bifurcation à ${dist} m, itinéraire ${w.want === 'D' ? 'DIRECT' : 'DÉVIÉ (30 km/h)'}. Vérifiez l'indicateur, A s'il est faux.`, '#9fe0ff', 6); }, 1500);
+  } else if (kind === 'manual') {
+    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : aiguille en panne à ${dist} m. Arrêtez-vous au signal, puis E pour la manœuvrer à la main.`, '#ffb35e', 6); }, 1500);
+  }
+}
+function updateSwitch(dt) {
+  const w = S.sw; if (!w || S.phase !== 'drive') return;
+  const dp = w.sig - S.pos;
+  if (w.kind === 'merge' && w.eta === null && dp < 190) {
+    w.eta = S.clock + dp / VMAX + 1.5 + Math.random() * 3; w.start = S.clock;   // à pleine vitesse, on bute sur le rouge : il faut ralentir tôt
+    msg('Signal jaune : un train arrive de l\'autre branche. Cédez-lui le passage !', '#ffd75e', 3.5);
+    beep(1250, 0.1, 'square', 0.04); beep(1250, 0.1, 'square', 0.04, 0.2);
+  }
+  if (w.kind === 'fork' && w.fixT > 0) {
+    w.fixT -= dt;
+    if (w.fixT <= 0) { w.fixT = 0; w.set = w.want; msg('Aiguille retracée : bon itinéraire, signal ouvert', '#7dff8a', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
+  }
+  if (!w.sigPassed && S.v === 0 && dp < 40 && (w.kind !== 'merge' || w.eta !== null)) w.stopped = true;
+  if (!w.sigPassed && S.pos > w.sig - 0.3) {
+    w.sigPassed = true;
+    if (swRed()) {
+      S.ebrake = true;
+      if (w.kind === 'manual') { w.done = true; pen(-150, 'Aiguille talonnée : franchissement avant la manœuvre !'); }
+      else if (w.kind === 'merge') pen(-80, 'Signal rouge franchi : le train de la branche freine d\'urgence !');
+      else { w.fixT = 0; w.set = w.want; pen(-80, 'Signal rouge franchi pendant le mouvement de l\'aiguille !'); }
+    } else if (w.kind === 'merge' && !w.stopped) { S.score += 40; msg('Convergence bien anticipée, sans arrêt (+40)', '#7dff8a', 3); }
+  }
+  if (w.kind === 'fork') {
+    const inZ = w.set === 'G' && S.pos > w.pos - 3 && S.pos < w.pos + SW_DEV + 5;
+    if (inZ) { S.limit = 30; w.limOn = true; } else if (w.limOn) { S.limit = 0; w.limOn = false; }
+    if (!w.passed && S.pos > w.pos) {
+      w.passed = true;
+      if (w.set !== w.want) {
+        S.ebrake = true; S.rev = { t: 0 };
+        pen(-100, `Mauvais itinéraire : la rame part en voie ${w.set === 'D' ? 'directe' : 'déviée'} !`);
+        for (let i = 0; i < 3; i++) beep(330, 0.2, 'sawtooth', 0.05, i * 0.25);
+      }
+    }
+  }
+}
+const REV_T = 5;      // retour en marche arrière : 5 s à l'écran, environ 20 s d'horaire perdues
+function updateReverse(dt) {
+  const r = S.rev; if (!r || S.v > 0) return;
+  S.ebrake = false; r.t += dt; S.clock += dt * 3;
+  if (r.t >= REV_T) {
+    const w = S.sw; S.rev = null;
+    if (w) { w.set = w.want; w.passed = false; w.sigPassed = true; S.pos = w.pos - 14; w.limOn = false; S.limit = 0; }
+    msg('Retour effectué, bon itinéraire tracé : repartez', '#9fe0ff', 3);
+  }
+}
+// ---- manœuvre manuelle de l'aiguille (mini-jeu) ----
+const MG_LOOK = () => Object.assign(mkPerson(0, 0), { kind: 'adult', kid: null, acc: null, acc2: null, bag: '#1f2a44', c: '#2a3c6e', pants: '#1f2a44', outfit: 'coat', hat: 'cap', glasses: false, scarf: null, slow: 1, party: false, suspect: false, h: 1.75, build: 1 });
+const canManual = () => { const w = S.sw; return w && w.kind === 'manual' && !w.done && !S.mg && S.phase === 'drive' && S.v === 0 && w.sig - S.pos > -0.5 && w.sig - S.pos < 40; };
+function startManual() {
+  S.mg = { ph: 'walk', x: 0, hits: 0, t: 0, ct: 0, flash: 0, ok: 0, look: MG_LOOK(), walk: 0, zone: 0.16 };
+  noise(0.4, 0.2, 'highpass', 2500, 0.7); beep(85, 0.25, 'triangle', 0.3, 0.3);
+  msg('Vous descendez sur la piste. → (ou D) pour marcher jusqu\'à l\'aiguille', '#9fe0ff', 3);
+}
+function updateManual(dt) {
+  const m = S.mg; if (!m) return;
+  m.t += dt; m.flash = Math.max(0, m.flash - dt); m.ok = Math.max(0, m.ok - dt);
+  const R = keys['arrowright'] || keys['d'], Lk = keys['arrowleft'] || keys['q'];
+  if (m.ph === 'walk' && R) { m.x = Math.min(1, m.x + dt / 2.4); m.walk += dt * 9; if (m.x >= 1) { m.ph = 'crank'; m.ct = 0; msg('ESPACE quand le curseur est dans la zone verte (3 fois)', '#ffd75e', 3); } }
+  if (m.ph === 'crank') m.ct += dt;
+  if (m.ph === 'back' && Lk) { m.x = Math.max(0, m.x - dt / 2.4); m.walk += dt * 9; if (m.x <= 0) finishManual(); }
+}
+const mgCursor = m => 0.5 + 0.5 * Math.sin(m.ct * (3.2 + m.hits * 0.9));
+function mgHit() {
+  const m = S.mg; if (!m || m.ph !== 'crank') return;
+  if (Math.abs(mgCursor(m) - 0.5) < m.zone / 2) {
+    m.hits++; m.ok = 0.35; m.zone *= 0.85;
+    beep(140, 0.15, 'square', 0.12); noise(0.15, 0.3, 'lowpass', 900, 0.8);
+    if (m.hits >= 3) {
+      m.ph = 'back'; S.sw.done = true;
+      beep(70, 0.3, 'triangle', 0.35, 0.1); noise(0.2, 0.4, 'lowpass', 600, 0.8, 0.1);
+      msg('Aiguille calée et verrouillée ! ← (ou Q) pour remonter en cabine', '#7dff8a', 3);
+    }
+  } else { m.flash = 0.35; sfxBad(); }
+}
+function finishManual() {
+  const m = S.mg; S.mg = null;
+  noise(0.4, 0.2, 'highpass', 2500, 0.7); beep(85, 0.25, 'triangle', 0.3, 0.2);
+  if (m.t < 13) { S.score += 40; msg(`Manœuvre rondement menée en ${Math.round(m.t)} s (+40). Signal ouvert, repartez !`, '#7dff8a', 3.5); }
+  else msg(`Manœuvre terminée en ${Math.round(m.t)} s. Signal ouvert, repartez`, '#9fe0ff', 3);
+}
+function drawManual() {
+  const m = S.mg; if (!m) return;
+  const yR = 128, sc = 34;
+  g.fillStyle = '#0b0c12'; g.fillRect(0, 0, W, VIEW_H);
+  // piédroit du tunnel, lampes, câbles
+  const wg = g.createLinearGradient(0, 10, 0, yR); wg.addColorStop(0, '#15161c'); wg.addColorStop(1, '#2a2a30');
+  g.fillStyle = wg; g.fillRect(0, 14, W, yR - 14);
+  for (let x = 30; x < W; x += 120) { glow(x, 40, 60, '255,200,110', 0.25); g.fillStyle = '#ffe0a0'; g.fillRect(x - 5, 37, 10, 5); }
+  [[60, '#1d1a14'], [66, '#2a1414'], [72, '#121216']].forEach(([y, c]) => { g.fillStyle = c; g.fillRect(0, y, W, 3); });
+  for (let x = 12; x < W; x += 34) { g.fillStyle = '#3a3a40'; g.fillRect(x, 58, 2, 18); }
+  // piste de service, ballast, rail, traverses
+  g.fillStyle = '#3e3c40'; g.fillRect(0, yR, W, 8); g.fillStyle = '#c8b43c'; g.fillRect(0, yR, W, 1);
+  g.fillStyle = '#1c1a1a'; g.fillRect(0, yR + 8, W, VIEW_H - yR - 8);
+  for (let x = 0; x < W; x += 14) { g.fillStyle = '#3a2e24'; g.fillRect(x, yR + 22, 9, 4); }
+  g.fillStyle = '#9aa0ac'; g.fillRect(0, yR + 19, W, 3);
+  // la rame à l'arrêt (avant, à gauche)
+  g.fillStyle = '#d6dce4'; g.fillRect(-10, 70, 96, yR + 16 - 70); g.fillStyle = '#9aa2ae'; g.fillRect(-10, 70, 96, 4);
+  g.fillStyle = '#1a2230'; g.fillRect(48, 82, 32, 24); g.fillStyle = '#2e6fb8'; g.fillRect(-10, yR - 2, 96, 4);
+  g.fillStyle = '#fff4c8'; g.fillRect(78, yR - 14, 8, 5); glow(90, yR - 12, 40, '255,240,190', 0.35);
+  g.fillStyle = LN().col; g.beginPath(); g.arc(30, 92, 7, 0, 7); g.fill(); txt(LN().num, 30, 96, 11, LN().fg, 'center');
+  // signal rouge et aiguille
+  const red = !S.sw || !S.sw.done, sx = 250;
+  g.fillStyle = '#2c2f38'; g.fillRect(sx, 66, 3, yR - 66); g.fillStyle = '#0e0f12'; g.fillRect(sx - 5, 52, 13, 22);
+  circ(sx + 1.5, 58, 3.5, red ? '#ff2a2a' : '#3a1414'); circ(sx + 1.5, 68, 3.5, red ? '#103a1a' : '#3dff6a');
+  glow(sx + 1.5, red ? 58 : 68, 16, red ? '255,40,40' : '60,255,100', 0.35);
+  const lx = 316, ang = -1.1 + Math.min(3, m.hits) / 3 * 2.2;      // levier : bascule d'un côté à l'autre
+  g.fillStyle = '#e0a020'; g.fillRect(lx - 14, yR + 6, 28, 8); g.fillStyle = '#222'; for (let k = 0; k < 4; k++) g.fillRect(lx - 12 + k * 7, yR + 6, 3, 8);
+  seg(lx, yR + 7, lx + Math.sin(ang) * 30, yR + 7 - Math.cos(ang) * 30, 3, '#d8d8d8');
+  circ(lx + Math.sin(ang) * 30, yR + 7 - Math.cos(ang) * 30, 3, '#d42a2a');
+  g.fillStyle = '#c8ccd4'; g.fillRect(lx + 14, yR + 17, 60, 2); g.save(); g.translate(lx + 14, yR + 19); g.rotate(-0.06 + Math.min(3, m.hits) * 0.04); g.fillRect(0, -1, 60, 2); g.restore();
+  // le conducteur
+  const px = 96 + m.x * (lx - 26 - 96);
+  m.look.dir = m.ph === 'back' ? -1 : 1;
+  drawPerson(px, yR, sc, m.look, m.ph === 'crank' ? 0 : m.walk);
+  g.fillStyle = '#ffe14a'; g.fillRect(px - 6, yR - 40, 12, 3);   // gilet haute visibilité
+  // consignes
+  g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 120, 4, 240, 22);
+  txt('MANŒUVRE MANUELLE DE L\'AIGUILLE', W / 2, 13, 11, '#ffd75e', 'center');
+  txt(m.ph === 'walk' ? '→ ou D : marcher jusqu\'au levier' : m.ph === 'crank' ? `ESPACE dans la zone verte : ${m.hits} / 3` : '← ou Q : remonter en cabine', W / 2, 23, 10, '#ffffff', 'center');
+  txt(`⏱ ${Math.floor(m.t)} s`, W - 8, 13, 11, m.t < 13 ? '#7dff8a' : '#ffb35e', 'right');
+  if (m.ph === 'crank') {
+    const bx = W / 2 - 80, by = 60, bw = 160;
+    g.fillStyle = m.flash ? 'rgba(255,40,40,0.9)' : 'rgba(6,8,14,0.9)'; g.fillRect(bx - 3, by - 3, bw + 6, 14);
+    g.fillStyle = '#333a48'; g.fillRect(bx, by, bw, 8);
+    g.fillStyle = m.ok ? '#c8ffd0' : '#3dff6a'; g.fillRect(bx + bw * (0.5 - m.zone / 2), by, bw * m.zone, 8);
+    const cx = bx + bw * mgCursor(m); g.fillStyle = '#ffffff'; g.fillRect(cx - 1, by - 3, 3, 14);
+  }
+}
+function drawReverse() {
+  const r = S.rev; if (!r) return;
+  g.fillStyle = 'rgba(4,6,12,0.7)'; g.fillRect(0, 0, W, VIEW_H);
+  if (S.v > 0) { txt('MAUVAIS ITINÉRAIRE : freinage d\'urgence', W / 2, 74, 14, '#ff6b5b', 'center'); return; }
+  txt('◄◄ RETOUR EN MARCHE ARRIÈRE', W / 2, 70, 16, '#ffb35e', 'center');
+  txt('Le PCC retrace l\'aiguille… l\'horaire tourne', W / 2, 86, 11, '#cfd6e6', 'center');
+  g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(W / 2 - 70, 94, 140, 4);
+  g.fillStyle = '#ffb35e'; g.fillRect(W / 2 - 70, 94, 140 * Math.min(1, r.t / REV_T), 4);
+}
+// indicateur d'itinéraire répété en cabine, à l'approche de la bifurcation
+function drawSwitchPanel() {
+  const w = S.sw; if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return;
+  const dp = w.pos - S.pos; if (dp > 130 || dp < 0) return;
+  const x = 6, y = 62, bw = 54, bh = 44;
+  g.fillStyle = 'rgba(6,8,14,0.9)'; g.fillRect(x, y, bw, bh); g.strokeStyle = '#555c6a'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
+  txt('INDICATEUR', x + bw / 2, y + 8, 9, '#8fa0b8', 'center');
+  if (w.fixT > 0) { if (Math.floor(S.t * 4) % 2) txt('· · ·', x + bw / 2, y + 28, 14, '#ffd75e', 'center'); }
+  else {
+    const cx = x + bw / 2, cy = y + 26, col = '#ffffff';
+    if (w.set === 'D') { seg(cx, cy + 9, cx, cy - 8, 3, col); seg(cx, cy - 9, cx - 5, cy - 3, 3, col); seg(cx, cy - 9, cx + 5, cy - 3, 3, col); }
+    else { seg(cx - 6, cy + 9, cx + 6, cy - 7, 3, col); seg(cx + 7, cy - 8, cx, cy - 7, 3, col); seg(cx + 7, cy - 8, cx + 6, cy - 1, 3, col); }
+    txt(w.set === 'D' ? 'DIRECT' : 'DÉVIÉ', cx, y + bh - 4, 10, w.set === 'D' ? '#ffffff' : '#ffd75e', 'center');
+  }
+}
+function swSprites(list) {
+  const w = S.sw; if (!w) return;
+  const yf = -2;
+  // branche (rails qui divergent ou convergent) et bouche du tunnel annexe à droite
+  const z0 = w.kind === 'merge' ? w.pos - SW_LEN : w.pos;
+  for (let z = z0; z < z0 + SW_LEN; z += 2) {
+    const d = z - S.pos; if (d < NEAR + 0.3 || d > DMAX) continue;
+    list.push({ d, draw: dd => {
+      const a = swOff(w, z), b = swOff(w, z + 2); if (a === null || b === null) return;
+      const d1 = dd + 2, f = Math.max(0.12, 1 - dd / 150);
+      if (Math.max(a, b) > 1.6) {   // ouverture dans le piédroit droit
+        poly([[2.29, yf, d1], [2.29, 0.9, d1], [2.29, 0.9, dd], [2.29, yf, dd]], '#020203');
+      }
+      for (const rx of [-0.72, 0.72]) {
+        const xa = rx + a, xb = rx + b; if (Math.min(xa, xb) > 2.25) continue;
+        const ca = Math.min(2.25, xa), cb = Math.min(2.25, xb);
+        poly([[cb - 0.04, yf + 0.12, d1], [cb + 0.04, yf + 0.12, d1], [ca + 0.04, yf + 0.12, dd], [ca - 0.04, yf + 0.12, dd]], sh(C.rail, Math.max(f, 0.3)));
+      }
+    } });
+  }
+  // lames d'aiguille : un trait brillant contre le rail de la voie tracée
+  const dA = w.pos - S.pos;
+  if (w.kind === 'fork' && dA > NEAR + 0.3 && dA < 70) list.push({ d: dA, draw: d => {
+    const rx = w.set === 'D' ? 0.62 : -0.62;
+    poly([[rx - 0.03, yf + 0.13, d + 4], [rx + 0.03, yf + 0.13, d + 4], [rx + 0.03, yf + 0.13, d], [rx - 0.03, yf + 0.13, d]], '#e8ecf4');
+  } });
+  // train de la branche (convergence) : il sort du tunnel annexe et passe devant
+  if (w.kind === 'merge' && w.eta !== null) {
+    const zt = w.pos + 11 * (S.clock - w.eta), x = zt < w.pos ? swOff(w, zt) : 0, d = zt - S.pos;
+    if (x !== null && x < 2.6 && d > NEAR + 0.5 && d < DMAX) list.push({ d, draw: dd => { g.save(); g.translate(x * F / dd, 0); drawLeaderTail(dd); g.restore(); } });
+    if (zt < w.pos - SW_LEN * 0.8 && w.pos - SW_LEN * 0.7 - S.pos > NEAR) {   // ses phares éclairent la bouche du tunnel
+      const dm = w.pos - SW_LEN * 0.75 - S.pos; list.push({ d: dm, draw: dd => { const [gx, gy] = P(2.3, -1.2, dd); glow(gx, gy, Math.min(60, 3 * F / dd), '255,236,190', 0.25 + 0.15 * Math.sin(S.t * 20)); } });
+    }
+  }
+  // signaux : signal d'aiguille, et signal d'avertissement 110 m avant la convergence
+  const sigs = [[w.sig, () => swRed() ? 'r' : 'g']];
+  if (w.kind === 'merge') sigs.push([w.pos - 110, () => swRed() || w.eta === null ? 'y' : 'g']);
+  sigs.forEach(([pz, st]) => { const d = pz - S.pos; if (d > NEAR + 0.3 && d < DMAX) list.push({ d, draw: dd => drawSigHead(dd, st()) }); });
+  // indicateur d'itinéraire et panneau 30 de la voie déviée
+  const di = w.pos - 45 - S.pos;
+  if (w.kind === 'fork' && di > NEAR + 0.3 && di < DMAX) list.push({ d: di, draw: d => {
+    const [cx0, cy0] = P(-1.95, 0.9, d), s0 = F / d;
+    const bw = Math.max(2, Math.round(0.75 * s0)), bh = bw, X = Math.round(cx0 - bw / 2), Y = Math.round(cy0 - bh / 2);
+    g.fillStyle = '#2c2f38'; g.fillRect(Math.round(cx0 - 0.05 * s0), Y + bh, Math.max(1, Math.round(0.1 * s0)), Math.round(P(-1.95, -2, d)[1] - Y - bh));
+    g.fillStyle = '#08090c'; g.fillRect(X, Y, bw, bh);
+    if (bw > 5 && w.fixT <= 0) {
+      const cx = X + bw / 2, cy = Y + bh / 2, r = bh * 0.32, lw = Math.max(1, bh * 0.1);
+      if (w.set === 'D') { seg(cx, cy + r, cx, cy - r, lw, '#ffffff'); seg(cx, cy - r, cx - r * 0.5, cy - r * 0.4, lw, '#ffffff'); seg(cx, cy - r, cx + r * 0.5, cy - r * 0.4, lw, '#ffffff'); }
+      else { seg(cx - r * 0.6, cy + r, cx + r * 0.6, cy - r * 0.7, lw, '#ffffff'); seg(cx + r * 0.6, cy - r * 0.7, cx, cy - r * 0.7, lw, '#ffffff'); seg(cx + r * 0.6, cy - r * 0.7, cx + r * 0.55, cy, lw, '#ffffff'); }
+      glow(cx, cy, bh, '255,255,255', 0.15);
+    }
+  } });
+  const dl = w.pos - 60 - S.pos;
+  if (w.kind === 'fork' && w.set === 'G' && dl > NEAR + 0.3 && dl < DMAX) list.push({ d: dl, draw: d => {
+    const [x0, y0] = P(-2.5, 0.2, d), [x1, y1] = P(-1.9, -0.4, d);
+    g.fillStyle = '#111'; g.fillRect(Math.round(x0) - 1, Math.round(y0) - 1, Math.round(x1 - x0) + 2, Math.round(y1 - y0) + 2);
+    g.fillStyle = '#ffd400'; g.fillRect(Math.round(x0), Math.round(y0), Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)));
+    const hp = y1 - y0; if (hp > 5) { g.fillStyle = '#111'; g.textAlign = 'center'; g.font = `${Math.min(30, Math.round(hp * 0.95))}px VT323, monospace`; g.fillText('30', (x0 + x1) / 2, y0 + hp * 0.82); }
+  } });
+  // levier de manœuvre (aiguille en panne)
+  if (w.kind === 'manual' && dA > NEAR + 0.3 && dA < DMAX) list.push({ d: dA, draw: d => {
+    const [bx, by] = P(1.6, yf, d), [, ty] = P(1.6, -1.3, d), s = F / d;
+    g.fillStyle = '#e0a020'; g.fillRect(Math.round(bx - 0.3 * s), Math.round(ty + 0.4 * s), Math.max(1, Math.round(0.6 * s)), Math.max(1, Math.round(by - ty - 0.4 * s)));
+    seg(bx, ty + 0.4 * s, bx + (w.done ? 0.3 : -0.3) * s, ty, Math.max(1, 0.08 * s), '#d8d8d8');
+    if (!w.done && Math.floor(S.t * 3) % 2) glow(bx, ty, Math.min(30, 1.5 * s), '255,180,60', 0.4);
+  } });
+}
+function drawSigHead(d, st) {
+  const sc = F / d;
+  const [bx, by] = P(-1.9, -2, d), [, ty] = P(-1.9, 1.1, d);
+  const pw = Math.max(1, Math.round(0.12 * sc));
+  g.fillStyle = '#2c2f38'; g.fillRect(Math.round(bx - pw / 2), Math.round(ty), pw, Math.round(by - ty));
+  const hw = Math.max(3, Math.round(0.7 * sc)), hh = Math.max(5, Math.round(1.4 * sc));
+  const X = Math.round(bx - hw / 2), Y = Math.round(ty - hh), lr = Math.max(1, Math.round(hw * 0.3));
+  g.fillStyle = '#0e0f12'; g.fillRect(X, Y, hw, hh);
+  const lamps = [['r', 0.22, '#ff2a2a', '#3a1414', '255,40,40'], ['y', 0.5, '#ffc21a', '#3a2c10', '255,190,30'], ['g', 0.78, '#3dff6a', '#103a1a', '60,255,100']];
+  lamps.forEach(([k, fy, on, off, rgb]) => {
+    g.fillStyle = st === k ? on : off; g.beginPath(); g.arc(X + hw / 2, Y + hh * fy, lr, 0, 7); g.fill();
+    if (st === k) glow(X + hw / 2, Y + hh * fy, Math.min(40, lr * 3), rgb, 0.35);
+  });
 }
 function sfxHorn() {
   if (!AC) return;
@@ -1274,7 +1631,7 @@ function finish() {
 }
 
 function update(dt) {
-  if (S.help) return;                    // jeu en pause pendant l'aide
+  if (S.help || S.paused) return;        // jeu en pause (aide ou pause)
   if (S.over) {                          // game over : quelques secondes d'effet, puis l'écran de fin
     S.t += dt; S.over.t += dt;
     if (S.over.t > 2.6 && S.mode === 'running') { S.mode = 'end'; S.t = 0; }
@@ -1315,7 +1672,10 @@ function update(dt) {
     S.theft.shown = true; S.theft.t = 0;
     for (let i = 0; i < 6; i++) beep(i % 2 ? 520 : 780, 0.12, 'square', 0.05, i * 0.13);
   }
-  if (S.theft && S.theft.shown) S.theft.t += dt;
+  if (S.theft && S.theft.shown) {
+    S.theft.t += dt;
+    if (!S.theft.expired && S.theft.t > CAM_WIN) { S.theft.expired = true; msg('Trop tard : le pickpocket s\'est fondu dans la foule', '#ff8a7a', 3); }
+  }
   if (S.annCd > 0) S.annCd -= dt;
   if (S.missionShow > 0) S.missionShow -= dt;
   if (S.phase === 'dwell' && S.suspectAt > 0 && S.clock >= S.suspectAt) { S.suspectAt = -1; spawnArrival(STATIONS[S.cur], Object.assign({}, SUSPECT_LOOK, { sp: 1.0 })); }
@@ -1331,7 +1691,8 @@ function update(dt) {
   S.brakeF = kS ? Math.min(1, Math.max(0.2, S.brakeF + dt / 0.3)) : 0;   // serre en 0,3 s
   const Z = kZ && !kS, B = kS;
   let a = 0;
-  if (Z) {
+  if (Z && (S.mg || S.rev)) { if (S.warnT <= 0) { msg(S.mg ? 'Terminez la manœuvre de l\'aiguille d\'abord' : 'Retour en marche arrière en cours…', '#ffb35e'); S.warnT = 2; } }
+  else if (Z) {
     if (S.phase === 'drive' && !S.ebrake) a += 1.7 - 0.6 * S.v / VMAX;   // traction : forte au démarrage, un peu moins à pleine vitesse
     else if (S.warnT <= 0) { msg('Fermez d\'abord les portes !', '#ff6b5b'); S.warnT = 2; }
   }
@@ -1341,6 +1702,9 @@ function update(dt) {
   S.pos += S.v * dt;
   updateTuto(dt);
   updateEvents(dt);
+  updateSwitch(dt);
+  updateReverse(dt);
+  updateManual(dt);
   updateLeader(dt);
   updateVacma(dt);
   if (S.hornT > 0) S.hornT -= dt;
@@ -2272,21 +2636,9 @@ function collectSprites() {
   }
   if (S.sigPos !== null) {
     const ds = S.sigPos - S.pos;
-    if (ds > NEAR + 0.3 && ds < DMAX) list.push({ d: ds, draw: d => {
-      const sc = F / d;
-      const [bx, by] = P(-1.9, -2, d), [, ty] = P(-1.9, 1.1, d);
-      const pw = Math.max(1, Math.round(0.12 * sc));
-      g.fillStyle = '#2c2f38'; g.fillRect(Math.round(bx - pw / 2), Math.round(ty), pw, Math.round(by - ty));
-      const hw = Math.max(3, Math.round(0.7 * sc)), hh = Math.max(5, Math.round(1.4 * sc));
-      const X = Math.round(bx - hw / 2), Y = Math.round(ty - hh);
-      g.fillStyle = '#0e0f12'; g.fillRect(X, Y, hw, hh);
-      const lr = Math.max(1, Math.round(hw * 0.32));
-      const red = S.sigRed > 0;
-      g.fillStyle = red ? '#ff2a2a' : '#3a1414'; g.beginPath(); g.arc(X + hw / 2, Y + hh * 0.3, lr, 0, 7); g.fill();
-      g.fillStyle = red ? '#103a1a' : '#3dff6a'; g.beginPath(); g.arc(X + hw / 2, Y + hh * 0.72, lr, 0, 7); g.fill();
-      if (sc > 3) { g.fillStyle = red ? 'rgba(255,40,40,0.25)' : 'rgba(60,255,100,0.2)'; g.beginPath(); g.arc(X + hw / 2, Y + hh * (red ? 0.3 : 0.72), lr * 2.5, 0, 7); g.fill(); }
-    }});
+    if (ds > NEAR + 0.3 && ds < DMAX) list.push({ d: ds, draw: d => drawSigHead(d, S.sigRed > 0 ? 'r' : 'g') });
   }
+  if (S.mode === 'running') swSprites(list);
   STATIONS.forEach(s => {
     const db = s.pos + 5 - S.pos;
     if (db > NEAR + 0.3 && db < DMAX) list.push({ d: db, draw: d => {
@@ -3147,13 +3499,15 @@ function cabBackground(t) {
   g.fillStyle = 'rgba(0,0,0,0.08)'; for (let k = 0; k < 30; k++) g.fillRect(hsh(k, 61) * 112, 40 + hsh(k, 62) * 32, 1, 0.5);
   g.fillStyle = '#c8ccd2'; g.fillRect(30, 0, 1.5, 72); g.fillRect(84, 0, 1.5, 72);
 }
-function drawCabCam() {
-  const sk = S.cab; if (!sk || !sk.shown || S.phase !== 'drive') return;
+const CAM_WIN = 14, SLIP_T = 15;           // fenêtre pour réagir (A) ; durée du sol glissant
+function drawCabCam(sk) {
+  if (!sk || !sk.shown || S.phase !== 'drive') return;
   // ouverture, puis fermeture une fois l'action faite (1,2 s pour lire la confirmation) ;
   // sol glissant : visible 6 s, puis seulement au moment d'une chute
   let pop = Math.min(1, sk.t * 5);
   if (sk.called) pop = Math.min(pop, Math.max(0, 1 - (sk.t - sk.calledAt - 1.2) * 5));
   else if (sk.type === 'slip' && sk.fallT <= 0) pop = Math.min(pop, Math.max(0, 1 - (sk.t - 6) * 5));
+  else if (sk.type !== 'slip') pop = Math.min(pop, Math.max(0, 1 - (sk.t - CAM_WIN) * 5));   // trop tard : la fenêtre se ferme
   if (pop <= 0) return;
   const K = 1.3, w = Math.round(112 * K * pop), h = Math.round(72 * K * pop), x0 = 8, y0 = VIEW_H - 8 - Math.round(72 * K);
   const flash = Math.floor(S.t * 4) % 2;
@@ -3164,7 +3518,16 @@ function drawCabCam() {
   const t = sk.t, fy = 50, away = Math.min(1, t / 3);       // fy : niveau du sol (pieds)
   cabBackground(t);
   const person = (x, pp, dir, walk = 0) => drawPerson(x, fy + 7, 20, Object.assign(pp, { dir }), walk);
-  if (sk.type === 'sick') {
+  if (sk.type === 'malaise') {
+    // un voyageur effondré au sol, un autre penché sur lui qui fait signe ; les autres reculent
+    person(14 - 6 * away, sk.side[0], -1); person(100 + 6 * away, sk.side[1], 1);
+    g.save(); g.translate(46, fy + 6); g.rotate(-Math.PI / 2); drawPerson(0, 0, 20, Object.assign(sk.look, { dir: 1 }), 0); g.restore();
+    g.save(); g.translate(72, fy + 7); g.rotate(-0.35); drawPerson(0, 0, 18, Object.assign(sk.look2, { dir: -1 }), 0); g.restore();
+    const wave = Math.sin(t * 9) * 3;
+    g.fillStyle = sk.look2.k; g.fillRect(76 + wave, fy - 30, 2.5, 2.5);
+    g.strokeStyle = sk.look2.c; g.lineWidth = 2; g.beginPath(); g.moveTo(72, fy - 20); g.lineTo(77 + wave, fy - 29); g.stroke();
+    if (flash) { g.fillStyle = '#ffffff'; g.fillRect(92, 10, 14, 14); g.fillStyle = '#d42a2a'; g.fillRect(97, 12, 4, 10); g.fillRect(94, 15, 10, 4); }
+  } else if (sk.type === 'sick') {
   // flaque qui s'étale
   const px = 61, pr = Math.min(1, t / 6);
   g.fillStyle = '#9a9440'; g.beginPath(); g.ellipse(px, fy + 2, 3 + 9 * pr, 1.5 + 3 * pr, 0, 0, 7); g.fill();
@@ -3232,15 +3595,21 @@ function drawCabCam() {
   txt(`CAM V${sk.car + 1} · INTÉRIEUR`, x0 + 3, y0 + 7, 9, '#ffffff');
   if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#ff2a2a'; g.beginPath(); g.arc(x0 + w - 5, y0 + 4.5, 2, 0, 7); g.fill(); }
   const foot = sk.type === 'slip' ? 'Freinez en douceur jusqu\'à la station'
-    : sk.called ? { sick: 'PCC prévenu : nettoyage en station', fight: 'Sécurité prévenue : elle attend à quai', bag: 'Signalé : inspection en station', vendor: 'Annonce faite : il descend en station' }[sk.type]
-    : { sick: 'A : prévenir le PCC', fight: 'A : appeler la sécurité', bag: 'A : signaler le bagage', vendor: 'A : annonce au micro' }[sk.type];
+    : sk.called ? { malaise: 'PCC prévenu : secours à quai', sick: 'PCC prévenu : nettoyage en station', fight: 'Sécurité prévenue : elle attend à quai', bag: 'Signalé : inspection en station', vendor: 'Annonce faite : il descend en station' }[sk.type]
+    : { malaise: 'A : prévenir le PCC (secours)', sick: 'A : prévenir le PCC', fight: 'A : appeler la sécurité', bag: 'A : signaler le bagage', vendor: 'A : annonce au micro' }[sk.type];
   g.fillStyle = sk.called ? 'rgba(20,70,30,0.9)' : sk.type === 'slip' ? 'rgba(110,70,10,0.92)' : 'rgba(120,10,10,0.9)'; g.fillRect(x0, y0 + h - 11, w, 11);
+  if (!sk.called) {
+    const fr = Math.max(0, 1 - sk.t / (sk.type === 'slip' ? SLIP_T : CAM_WIN));
+    g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x0, y0 + h - 14, w, 3);
+    g.fillStyle = fr < 0.3 ? '#ff4a3a' : '#ffd75e'; g.fillRect(x0, y0 + h - 14, w * fr, 3);
+  }
   txt(foot, x0 + w / 2, y0 + h - 3, 10, '#ffffff', 'center', 'VT323', w - 4);
 }
 function drawTheft() {
   const T = S.theft; if (!T || !T.shown || S.phase !== 'drive') return;
+  const close = Math.max(0, 1 - (T.t - CAM_WIN) * 5); if (close <= 0) return;
   // caméra intérieure, zoom sur la poche d'un voyageur : une main s'y glisse et ressort avec le portefeuille
-  const K = 1.3, pop = Math.min(1, T.t * 5), w = Math.round(112 * K * pop), h = Math.round(72 * K * pop);
+  const K = 1.3, pop = Math.min(1, T.t * 5, close), w = Math.round(112 * K * pop), h = Math.round(72 * K * pop);
   const x0 = W - 8 - Math.round(112 * K), y0 = VIEW_H - 8 - Math.round(72 * K), flash = Math.floor(S.t * 4) % 2;
   g.fillStyle = '#0d0f14'; g.fillRect(x0 - 3, y0 - 3, w + 6, h + 6);
   g.strokeStyle = flash ? '#ff4a3a' : '#7a1a14'; g.lineWidth = 1.5; g.strokeRect(x0 - 2.25, y0 - 2.25, w + 4.5, h + 4.5);
@@ -3282,6 +3651,9 @@ function drawTheft() {
   drawSkull(x0 + w - 6, y0 + 8, 1);
   g.fillStyle = flash ? 'rgba(150,10,10,0.95)' : 'rgba(100,6,6,0.95)'; g.fillRect(x0, y0 + h - 11, w, 11);
   txt(`VOL en V${T.car + 1} — A : tirer l'alarme`, x0 + w / 2, y0 + h - 3, 10, flash ? '#ffd75e' : '#ffffff', 'center', 'VT323', w - 4);
+  const fr = Math.max(0, 1 - T.t / CAM_WIN);
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x0, y0 + h - 14, w, 3);
+  g.fillStyle = fr < 0.3 ? '#ff4a3a' : '#ffd75e'; g.fillRect(x0, y0 + h - 14, w * fr, 3);
 }
 function drawRadio() {
   if (!S.radio) return;
@@ -3392,9 +3764,9 @@ function drawHelp() {
     'V puis 1/2 : annonces (répartir, portes).',
     'Plan de ligne : voyageurs en attente ; moins',
     'de saturation = bonus en fin de service.',
-    'K : klaxon (personne sur la voie).',
+    'K : klaxon · E : aiguille en panne (à l\'arrêt).',
     'Espace : veille automatique (quand elle sonne).',
-    'M : missions   H : signaler les louches',
+    'M : missions · H : louches · Échap : pause',
   ]);
   txt('GAME OVER si : voyageur percuté · collision avec le train devant · déraillement · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
   txt('? ou Échap : reprendre', W / 2, 212, 9, '#8fa0b8', 'center');
@@ -3641,7 +4013,7 @@ function render() {
   drawGauge();
   drawCab();
   if (S.mode === 'running' && S.phase !== 'drive') { drawCCTV(); drawPops(); drawTraffic(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); }
-  if (S.mode === 'running' && S.phase === 'drive') { drawSchedChip(); drawLeaderPanel(); drawTopCam(); drawTrafficWarn(); }
+  if (S.mode === 'running' && S.phase === 'drive') { drawSchedChip(); drawLeaderPanel(); drawTopCam(); drawTrafficWarn(); drawSwitchPanel(); }
   if (S.alarm && Math.floor(S.t * 4) % 2) { g.fillStyle = 'rgba(255,0,0,0.12)'; g.fillRect(0, 0, W, VIEW_H); }
   drawDoorAlarm();
   if (S.mode === 'running' && S.phase === 'drive' && S.person && S.person.state === 'track' && S.person.seen) {   // danger : cadre rouge pulsé
@@ -3651,7 +4023,7 @@ function render() {
     vg.addColorStop(0, 'rgba(255,0,0,0)'); vg.addColorStop(1, `rgba(255,0,0,${0.3 * pz})`); g.fillStyle = vg; g.fillRect(0, 0, W, VIEW_H);
   }
   drawFx();
-  if (S.mode === 'running') { drawCabCam(); drawRadio(); drawAnnonce(); drawTheft(); }
+  if (S.mode === 'running') { drawManual(); drawReverse(); drawCabCam(S.cab); drawCabCam(S.malaise); drawIncidentBars(); drawRadio(); drawAnnonce(); drawTheft(); }
   if (S.mode === 'running' && S.missionShow > 0 && !S.radio) {
     g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 110, 54, 220, 50);
     drawMissions(W / 2 - 102, 66, false);
@@ -3663,6 +4035,7 @@ function render() {
   if (S.mode === 'end') drawEnd();
   if (S.mode === 'running' && S.over) drawGameOver();
   if (S.help) drawHelp();
+  if (S.paused && !S.help) drawPause();
 }
 
 reset('title');
