@@ -19,7 +19,7 @@
 const cv = document.getElementById('c');
 const g = cv.getContext('2d');
 const W = 384, H = 216, VIEW_H = 170;
-const VERSION = 'v1.9 · barricades';
+const VERSION = 'v1.10 · fuite guidée';
 let RES = 2;
 
 // Remplit la fenêtre en gardant le 16:9, avec un facteur entier en pixels
@@ -483,6 +483,7 @@ const sfxBad = () => beep(130, 0.35, 'sawtooth', 0.06);
 
 // ---------- Rétro (passagers vus dans le rétroviseur) ----------
 function setupMirror(st) {
+  if (!S.tipCars && S.tuto < 0 && STATIONS.indexOf(st) > 0 && STATIONS.indexOf(st) < STATIONS.length - 1) { S.tipCars = true; setTimeout(() => { if (S.mode === 'running' && S.phase !== 'drive') msg('Astuce : touches 1 à 5 pour fermer (ou rouvrir) les portes d\'une seule voiture. La touche est affichée en bas de chaque caméra.', '#ffd75e', 7); }, 1200); }
   S.mp = []; S.carShut = [false, false, false, false, false];
   const si = STATIONS.indexOf(st), last = si === STATIONS.length - 1;
   // descente : une part de la rame, plus forte dans les grosses stations, tout le monde au terminus
@@ -790,6 +791,8 @@ function startService(tuto) {
   if (FIRE()) {
     msg('🔥 Une vague de feu remonte la ligne ! Embarquez un maximum de voyageurs et fuyez jusqu\'au terminus.', '#ffb35e', 6);
     setTimeout(() => { if (S.mode === 'running' && S.fire) msg(`Abri : ${STATIONS[STATIONS.length - 1].name}. Chaque seconde à quai fait monter du monde… et rapproche le feu.`, '#ffd75e', 6); }, 6500);
+    let seenF = false; try { seenF = localStorage.getItem('dm_tuto_fire') === '1'; } catch (err) {}
+    if (tuto || !seenF) { S.tuto = 0; S.tutoT = 0; }
   } else {
     msg(`Ligne ${LN().num} · ${STATIONS[0].name} — en voiture !`, '#ffd75e');
     let seen = false; try { seen = localStorage.getItem('dm_tuto') === '1'; } catch (err) {}
@@ -915,28 +918,45 @@ const TUTO = [
   { t: 'Bravo ! Chaque station vaut 3 étoiles : arrêt précis, à l\'heure, quai vidé.', k: '', done: () => S.tutoT > 6 },
   { t: 'Visez la médaille d\'or (8000 pts). Touche ? : aide et légendes. Bon service !', k: '?', done: () => S.tutoT > 6 },
 ];
+// première fuite guidée (mode feu) : les consignes suivent ce qui arrive vraiment (défi du tunnel, station infestée…)
+const tunnelTip = () => S.barr && !S.barr.broken ? ['BARRICADE DE ZOMBIES : foncez à fond (au moins 60 km/h) pour la briser !', 'Z']
+  : S.sw && S.sw.kind === 'fork' ? ['AIGUILLAGE : appuyez sur ← ou → selon la flèche en haut à droite, avant le verrou.', S.sw.want === 'D' ? '←' : '→']
+  : S.bends && S.bends.length ? ['VIRAGES : freinez (S) pour rester sous le profil vert dans le virage, sinon déraillement.', 'S']
+  : ['Ligne droite : aucune limite, foncez !', 'Z'];
+const TUTO_F = [
+  { t: 'Une vague de feu vous poursuit ! Amenez un maximum de voyageurs jusqu\'à l\'abri du terminus.', k: '', done: () => S.tutoT > 6 },
+  { t: 'À quai, les voyageurs montent tant que vous attendez… Mais regardez le panneau en bas à gauche : le feu approche.', k: '', done: () => S.tutoT > 7 },
+  { t: 'Partez avant qu\'il soit trop près : SONNERIE (P), puis FERMETURE (Entrée).', k: 'P', done: () => S.phase === 'drive' && S.v > 0.5 || S.phase === 'closing' && S.tutoT > 1 },
+  { t: 'Maintenez Z pour foncer. Plus la rame est chargée ou mal répartie, moins elle accélère (⚙ traction).', k: 'Z', done: () => S.v * 3.6 > 30 },
+  { t: () => tunnelTip()[0], k: () => tunnelTip()[1], done: () => S.next < STATIONS.length && STATIONS[S.next].pos - S.pos < 140 || S.tutoT > 25 },
+  { t: () => STATIONS[S.next] && STATIONS[S.next].zombie ? '☣ Station infestée de zombies : NE VOUS ARRÊTEZ PAS, traversez !' : 'Freinez avec S pour vous arrêter sur la marque STOP.', k: () => STATIONS[S.next] && STATIONS[S.next].zombie ? 'Z' : 'S', done: () => S.phase !== 'drive' || (STATIONS[S.cur] && STATIONS[S.cur].res.skipped && S.tutoT > 1) },
+  { t: 'Touches 1 à 5 (en bas de chaque caméra) : fermer une voiture pour envoyer la foule vers les autres et équilibrer la rame.', k: '1', done: () => S.tutoT > 8 },
+  { t: 'À chaque tunnel son défi : virages, aiguillages ou barricade. Au terminus, note sur 20. Touche ? : aide. Bonne fuite !', k: '?', done: () => S.tutoT > 8 },
+];
+const TUTOS = () => FIRE() ? TUTO_F : TUTO, TUTO_KEY = () => FIRE() ? 'dm_tuto_fire' : 'dm_tuto';
 function updateTuto(dt) {
   if (S.tuto < 0) return;
   S.tutoT += dt;
-  if (TUTO[S.tuto].done()) {
+  const L = TUTOS();
+  if (L[S.tuto].done()) {
     S.tuto++; S.tutoT = 0; beep(1175, 0.08, 'sine', 0.05);
-    if (S.tuto >= TUTO.length) { S.tuto = -1; try { localStorage.setItem('dm_tuto', '1'); } catch (e) {} }
+    if (S.tuto >= L.length) { S.tuto = -1; try { localStorage.setItem(TUTO_KEY(), '1'); } catch (e) {} }
   }
 }
 function drawTuto() {
   // bandeau en bas de l'écran, à la place de la ligne d'aide : ne masque ni la voie ni les caméras
   if (S.mode !== 'running' || S.tuto < 0) return;
-  const st = TUTO[S.tuto], y = H - 11, h = 11;
+  const L = TUTOS(), st = L[S.tuto], y = H - 11, h = 11, stT = typeof st.t === 'function' ? st.t() : st.t, stK = typeof st.k === 'function' ? st.k() : st.k;
   const pulse = 0.5 + 0.5 * Math.sin(S.t * 5);
   g.fillStyle = 'rgba(255,215,94,0.14)'; g.fillRect(0, y, W, h);
   g.fillStyle = `rgba(255,215,94,${0.4 + 0.6 * pulse})`; g.fillRect(0, y, W, 0.6);
-  txt(`TUTO ${S.tuto + 1}/${TUTO.length}`, 6, y + 7, 9, '#ffd75e');
+  txt(`TUTO ${S.tuto + 1}/${L.length}`, 6, y + 7, 9, '#ffd75e');
   let x = 48;
-  if (st.k) {
+  if (stK) {
     g.fillStyle = '#d8dce4'; g.fillRect(x, y + 0.5, 10, 7.5); g.fillStyle = '#9aa1ae'; g.fillRect(x, y + 7.2, 10, 0.8);
-    txt(st.k, x + 5, y + 6.6, 9, '#111', 'center'); x += 14;
+    txt(stK, x + 5, y + 6.6, 9, '#111', 'center'); x += 14;
   }
-  txt(st.t, x, y + 7, 11, '#ffffff', 'left', 'VT323', W - x - 6);
+  txt(stT, x, y + 7, 11, '#ffffff', 'left', 'VT323', W - x - 6);
 }
 
 // ---------- Horaire : avance / retard par rapport à un train de référence parfaitement à l'heure ----------
@@ -3868,8 +3888,19 @@ function drawCCTV() {
     if (S.suspects.some(x => x.car === car)) {
       g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(SX + 90, SY + 1, 12, 9); drawSkull(SX + 96, SY + 9, 1);
     }
-    if (car === S.dirtyCar) { g.fillStyle = 'rgba(120,100,10,0.9)'; g.fillRect(SX + CAM_W / 2 - 30, SY + CAM_H - 12, 60, 10); txt(S.dirtyKeep ? 'SOUILLÉE' : `NETTOYAGE ${Math.ceil(S.cleanT)} s`, SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
-    else if (cf >= 1) { g.fillStyle = 'rgba(160,20,20,0.85)'; g.fillRect(SX + CAM_W / 2 - 22, SY + CAM_H - 12, 44, 10); txt('COMPLET', SX + CAM_W / 2, SY + CAM_H - 4, 10, '#ffffff', 'center'); }
+    if (car === S.dirtyCar) { g.fillStyle = 'rgba(120,100,10,0.9)'; g.fillRect(SX + CAM_W - 63, SY + CAM_H - 13, 60, 10); txt(S.dirtyKeep ? 'SOUILLÉE' : `NETTOYAGE ${Math.ceil(S.cleanT)} s`, SX + CAM_W - 33, SY + CAM_H - 5, 10, '#ffffff', 'center'); }
+    else if (cf >= 1) { g.fillStyle = 'rgba(160,20,20,0.85)'; g.fillRect(SX + CAM_W - 47, SY + CAM_H - 13, 44, 10); txt('COMPLET', SX + CAM_W - 25, SY + CAM_H - 5, 10, '#ffffff', 'center'); }
+    if ((S.phase === 'dwell' || S.phase === 'alert') && S.next < STATIONS.length && S.doors > 0.5) {
+      // la touche à utiliser, dessinée comme une touche de clavier : elle clignote quand c'est le moment de s'en servir
+      const shut = carShut(car), stuck = !FIRE() && S.cars[car] >= CAR_CAP && !shut && S.mp.some(m => m.st === 'walk' && m.halt && carOf(m.door) === car);
+      const call = stuck || (!FIRE() && !shut && vialState(car) === 'ok'), on = call && Math.floor(S.t * 4) % 2;
+      const kx = SX + 4, ky = SY + CAM_H - 16;
+      g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(kx - 1, ky - 1, 58, 14);
+      g.fillStyle = on ? '#ffd75e' : '#e6e8ec'; g.fillRect(kx, ky, 12, 12);                  // touche
+      g.fillStyle = on ? '#b08a20' : '#9aa0aa'; g.fillRect(kx, ky + 10, 12, 2);
+      txt(String(car + 1), kx + 6, ky + 9, 11, '#111', 'center');
+      txt(shut ? 'ROUVRIR' : 'FERMER', kx + 15, ky + 9, 10, shut ? '#9fe0ff' : on ? '#ffd75e' : '#e6ecf5');
+    }
     if (S.doors > 0 && S.alerted) for (const dz of [z0 + 4, z0 + 11]) {   // après la sonnerie seulement
       if (doorState(dz) !== 2) continue;
       const cx = SX + (dz - z0 - CAM_CROP) * (112 / 15) * CAM_K, hw = 0.95 * (112 / 15) * CAM_K;
@@ -4787,47 +4818,81 @@ function drawHelp() {
       else txt(t, x, y + 12 + i * 10, 10, c, 'left', 'VT323', 182);
     });
   };
-  col(10, 28, 'LE BUT', [
-    'Chaque station vaut 3 étoiles :',
-    ['#ffd75e', '★ arrêt à moins de 1,5 m de la marque'],
-    ['#ffd75e', '★ entrée à quai à ±2 s de l\'heure'],
-    ['#ffd75e', '★ quai vidé (personne ne reste)'],
-    '+5 par voyageur monté, −5 par voyageur laissé,',
-    '−10 par seconde d\'écart à l\'arrivée : attendre ou partir ?',
-    '🛡 Sécurité : chaque faute enlève des points.',
-    `Médailles : bronze ${MEDS()[0][0]} · argent ${MEDS()[1][0]} · or ${MEDS()[2][0]}`,
-  ]);
-  col(198, 28, 'CAMÉRAS DE QUAI', [
-    ['#3dff6a', '■porte libre'],
-    ['#ffb35e', '■voyageur qui approche de la porte'],
-    ['#ff2a2a', '■porte occupée : ne fermez pas !'],
-    'Pastille en coin : pire état des 2 portes.',
-    'Barre près de CAM : remplissage de la voiture.',
-    'Carré rouge sur un voyageur : il ne peut plus',
-    'monter (voiture pleine ou sonnerie passée).',
-  ]);
-  col(10, 122, 'EN CONDUITE', [
-    'Cadran : curseur blanc = votre vitesse,',
-    'zone verte = vitesse idéale pour s\'arrêter pile.',
-    'Panneaux 50 / 25 / 10 : mètres avant la marque.',
-    'Z : accélérer. S : freiner (serre en 0,5 s ;',
-    'petite touche = petit freinage).',
-    'Bips de plus en plus rapides : marque toute proche.',
-    ['#4fc8ff', 'HORAIRE (en haut) : bleu avance, rouge retard.'],
-    ['#ffb35e', 'Repère orange : limitation travaux.'],
-    ['#4fc8ff', 'En avance ? Le train devant vous ralentit (bleu).'],
-  ]);
-  col(198, 122, 'ACTIONS', [
-    'A : radio — porte retenue, individu louche',
-    '      (capuche) à bord ; alarme en cas de vol.',
-    '1 à 5 : fermer / rouvrir les portes d\'une voiture.',
-    'Plan de ligne : voyageurs en attente ; moins',
-    'de saturation = bonus en fin de service.',
-    'K : klaxon · E : aiguille en panne · ← → : direction',
-    'Espace : veille automatique (quand elle sonne).',
-    'M : missions · H : louches · Échap : pause',
-  ]);
-  txt(FIRE() ? 'GAME OVER si : la vague de feu rattrape la rame · voyageur percuté · déraillement' : 'GAME OVER si : voyageur percuté · collision avec le train devant · déraillement · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
+  if (FIRE()) {   // aide du mode Vague de feu
+    col(10, 28, 'LE BUT', [
+      'Une vague de feu remonte la ligne derrière vous :',
+      'amenez un maximum de voyageurs au terminus.',
+      'À quai, plus on attend, plus il en monte…',
+      ['#ffb35e', '…mais le feu approche (panneau bas gauche).'],
+      'Quai brûlé : ses voyageurs sont perdus.',
+      'À l\'abri : décompte et note sur 20 (55 % = 20/20).',
+      `Médailles : bronze ${MEDS()[0][0]} · argent ${MEDS()[1][0]} · or ${MEDS()[2][0]}`,
+    ]);
+    col(198, 28, 'À QUAI', [
+      'Pas de limite de place : on s\'entasse.',
+      'Chiffre sur chaque caméra : voyageurs à bord.',
+      '⚙ Traction : une rame lourde ou mal répartie',
+      'accélère moins bien.',
+      'Touche 1 à 5 (sous chaque caméra) : fermer',
+      'une voiture, la foule va vers les autres.',
+      ['#9aff6a', '☣ Station infestée : ne vous arrêtez pas !'],
+    ]);
+    col(10, 122, 'DÉFIS DE TUNNEL (un par tunnel)', [
+      ['#7dff8a', 'Virages : restez sous le profil vert ;'],
+      ['#7dff8a', 'seul le virage compte, la ligne droite est libre.'],
+      ['#9fe0ff', 'Aiguillages : ← ou → selon la flèche en haut'],
+      ['#9fe0ff', 'à droite ; « puis » annonce la suivante.'],
+      ['#ffb35e', 'Barricade : foncez, au moins 60 km/h. Trop lent :'],
+      ['#ffb35e', 'rebond et marche arrière, mais elle se fissure.'],
+    ]);
+    col(198, 122, 'COMMANDES', [
+      'Z : accélérer · S : freiner',
+      'P : sonnerie · Entrée : fermer les portes',
+      '← → : aiguillages · 1 à 5 : voitures',
+      'Caméra arrière : 3 s après chaque départ.',
+      'Pastille VAGUE DE FEU : distance au feu.',
+      'Échap : pause · ? : cette aide',
+    ]);
+  } else {   // aide du service normal
+    col(10, 28, 'LE BUT', [
+      'Chaque station vaut 3 étoiles :',
+      ['#ffd75e', '★ arrêt à moins de 1,5 m de la marque'],
+      ['#ffd75e', '★ entrée à quai à ±2 s de l\'heure'],
+      ['#ffd75e', '★ quai vidé (personne ne reste)'],
+      '+5 par voyageur monté, −5 par voyageur laissé.',
+      ['#7dff8a', 'Voitures dans le vert (60–85 %) : +25 chacune,'],
+      ['#7dff8a', '+100 si les 5 le sont (dosage parfait).'],
+      `Médailles : bronze ${MEDS()[0][0]} · argent ${MEDS()[1][0]} · or ${MEDS()[2][0]}`,
+    ]);
+    col(198, 28, 'CAMÉRAS DE QUAI', [
+      ['#3dff6a', '■porte libre'],
+      ['#ffb35e', '■voyageur qui approche de la porte'],
+      ['#ff2a2a', '■porte occupée : ne fermez pas !'],
+      'Niveau dans la caisse : remplissage (40 places).',
+      'Voiture pleine : la foule reste bloquée devant.',
+      'Touche 1 à 5 (sous chaque caméra) : fermer',
+      'la voiture, la foule va à la porte voisine.',
+    ]);
+    col(10, 122, 'EN CONDUITE', [
+      'Z : accélérer · S : freiner (appui court = peu).',
+      'Courbe d\'arrêt : gardez le curseur dans le vert.',
+      'Panneaux 50 / 25 / 10 : mètres avant la marque.',
+      ['#7dff8a', 'Virages : restez sous le profil vert (déraillement'],
+      ['#7dff8a', 'au-delà de la ligne rouge pointillée).'],
+      ['#9fe0ff', '← → : direction aux bifurcations.'],
+      ['#4fc8ff', 'HORAIRE : bleu avance, rouge retard.'],
+    ]);
+    col(198, 122, 'ACTIONS', [
+      'P : sonnerie · Entrée : fermer les portes',
+      'A : radio (incidents à bord, porte retenue…)',
+      'Espace : veille (quand elle sonne)',
+      'K : klaxon (personne ou chien sur la voie)',
+      'Aiguille en panne : arrêt au signal, puis',
+      'flèches en rythme (← ↓ ↑ → ou Q S Z D).',
+      'M : missions · H : louches · Échap : pause',
+    ]);
+  }
+  txt(FIRE() ? 'GAME OVER si : la vague de feu rattrape la rame · déraillement' : 'GAME OVER si : voyageur percuté · collision avec le train devant · déraillement · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
   txt('? ou Échap : reprendre', W / 2, 212, 9, '#8fa0b8', 'center');
 }
 function keycap(x, y, label, w = 12) {

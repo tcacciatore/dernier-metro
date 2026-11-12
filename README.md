@@ -38,7 +38,7 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 À quai, le remplissage se lit **directement sur la voiture filmée** par chaque caméra : un niveau coloré monte dans la caisse, avec un gros pourcentage au centre. Bleu : il reste de la place ; vert (« DANS LE VERT ») : la bonne zone, entre les deux pointillés verts. Le trait rouge marque les 100 %.
 
 - Chaque voiture a 40 places et ne dépasse jamais 100 %. Une fois pleine, les voyageurs restent **bloqués devant ses portes** : fermez-la (touche 1 à 5) pour qu'ils comprennent et filent vers la porte ouverte la plus proche, dans la voiture voisine. Visez la **zone verte** (60 à 85 %, soit 24 à 34 voyageurs).
-- Touches **1 à 5** : fermer les portes d'une seule voiture (« 🔒 FERMÉE » sur la caméra). Ceux qui attendaient devant se rabattent sur les voitures voisines : c'est ainsi qu'on oriente la foule vers les voitures encore vides. Rappuyez pour rouvrir. Marche aussi sur un clavier AZERTY, sans Maj.
+- Touches **1 à 5** : fermer les portes d'une seule voiture (« 🔒 FERMÉE » sur la caméra). La touche est dessinée en bas de chaque caméra (« 3 FERMER ») et clignote quand c'est le moment de s'en servir ; une astuce le rappelle au premier arrêt. Ceux qui attendaient devant se rabattent sur les voitures voisines : c'est ainsi qu'on oriente la foule vers les voitures encore vides. Rappuyez pour rouvrir. Marche aussi sur un clavier AZERTY, sans Maj.
 - Au départ : +25 par voiture dans le vert, **+100 de plus pour un DOSAGE PARFAIT** (les 5 dans le vert).
 - En mode Vague de feu, même affichage et mêmes touches 1 à 5, mais sans dosage : pas de zone verte ni de bonus, on embarque un maximum de monde (le niveau passe du bleu au jaune puis à l'orange). Fermer une voiture sert à envoyer la foule vers les autres, par exemple pour équilibrer la rame et garder de la traction.
 
@@ -61,7 +61,9 @@ Un tunnel a soit des virages, soit des aiguillages, jamais les deux. Les tunnels
 
 Sur l'écran titre, **▲ ▼** choisit le mode : *Service normal* ou *Vague de feu*.
 
-Une vague de feu remonte la ligne derrière la rame. Il n'y a plus d'horaire ni de descente : les voyageurs montent, et le but est d'en amener un maximum jusqu'à l'abri du terminus.
+Une vague de feu remonte la ligne derrière la rame. La première fuite est **guidée** : un bandeau en bas de l'écran donne une consigne à la fois (attendre ou partir, foncer, le défi du tunnel en cours, la station infestée, les touches 1 à 5). L'aide (**?**) a une page propre à chaque mode.
+
+Il n'y a plus d'horaire ni de descente : les voyageurs montent, et le but est d'en amener un maximum jusqu'à l'abri du terminus.
 
 - **Attendre ou partir** : à chaque station, plus vous restez, plus de voyageurs montent (ils dévalent les escaliers par vagues)… mais le feu se rapproche. La pastille VAGUE DE FEU, la **caméra arrière** (affichée pendant les 3 secondes qui suivent chaque départ) et le panneau à quai donnent sa distance et le temps restant ; l'écran rougeoie quand elle est tout près.
 - **Rattrapé** : si la vague atteint l'arrière de la rame, c'est perdu. Elle accélère si vous la distancez trop : impossible de la semer.
