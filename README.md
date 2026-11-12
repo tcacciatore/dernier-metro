@@ -28,7 +28,6 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 | **K** | Klaxon |
 | **A** | Radio / alarme (incidents à bord) |
 | **← / →** | Choisir la direction à la bifurcation (direct / dévié) |
-| **V** | Annonces voyageurs |
 | **M** | Missions |
 | **?** | Aide (jeu en pause) |
 | **F** | Plein écran |
@@ -38,7 +37,7 @@ Mais chaque seconde passée à quai pour faire monter du monde se paie en retard
 
 À quai, le remplissage se lit **directement sur la voiture filmée** par chaque caméra : un niveau coloré monte dans la caisse, avec un gros pourcentage au centre. Bleu : il reste de la place ; vert (« DANS LE VERT ») : la bonne zone, entre les deux pointillés verts. Le trait rouge marque les 100 %.
 
-- Chaque voiture a 40 places et ne dépasse jamais 100 % : une fois pleine, les voyageurs filent vers la porte ouverte la plus proche, dans la voiture voisine. Visez la **zone verte** (60 à 85 %, soit 24 à 34 voyageurs).
+- Chaque voiture a 40 places et ne dépasse jamais 100 %. Une fois pleine, les voyageurs restent **bloqués devant ses portes** : fermez-la (touche 1 à 5) pour qu'ils comprennent et filent vers la porte ouverte la plus proche, dans la voiture voisine. Visez la **zone verte** (60 à 85 %, soit 24 à 34 voyageurs).
 - Touches **1 à 5** : fermer les portes d'une seule voiture (« 🔒 FERMÉE » sur la caméra). Ceux qui attendaient devant se rabattent sur les voitures voisines : c'est ainsi qu'on oriente la foule vers les voitures encore vides. Rappuyez pour rouvrir. Marche aussi sur un clavier AZERTY, sans Maj.
 - Au départ : +25 par voiture dans le vert, **+100 de plus pour un DOSAGE PARFAIT** (les 5 dans le vert).
 - En mode Vague de feu, même affichage et mêmes touches 1 à 5, mais sans dosage : pas de zone verte ni de bonus, on embarque un maximum de monde (le niveau passe du bleu au jaune puis à l'orange). Fermer une voiture sert à envoyer la foule vers les autres, par exemple pour équilibrer la rame et garder de la traction.
@@ -71,6 +70,8 @@ Une vague de feu remonte la ligne derrière la rame. Il n'y a plus d'horaire ni 
 - **Le poids** : chaque voyageur alourdit la rame. Plus elle est chargée, moins elle accélère (jusqu'à environ −50 %), et une rame mal répartie (une voiture bondée, une autre vide) perd encore jusqu'à 30 % de traction. La traction s'affiche sur le panneau à quai (⚙) et sous la pastille VAGUE DE FEU. Prendre 50 voyageurs de plus, c'est repartir plus lentement avec le feu derrière.
 - **Stations infestées** ☣ : certaines stations ne contiennent que des zombies. Le PCC prévient au départ : **ne vous arrêtez pas**, traversez (+50). Si vous vous arrêtez, fermez les portes au plus vite : chaque zombie qui monte contamine 6 voyageurs.
 - **Virages dans chaque tunnel sans aiguillage**, avec leur limite (25 à 40 km/h, jamais plus lents que la vague) et le même profil de vitesse qu'en service normal. Seul le virage se négocie : en ligne droite, aucune limite, le profil n'est qu'un guide pour freiner à temps (on ne déraille qu'en entrant trop vite dans la courbe). Aux stations infestées, pas de courbe d'arrêt : on traverse.
+- **Défis de tunnel** : chaque tunnel a un seul défi, à parts égales : des virages, des aiguillages, ou une barricade. Les longs tunnels ont un grill d'aiguillages.
+- **Barricade de zombies** : une barricade en bois, gardée par des zombies, bloque le tunnel. Le PCC prévient au départ ; le bandeau donne la vitesse requise (60 km/h) et la vôtre. **Foncez à fond** : au-dessus de la vitesse requise, elle vole en éclats (+60). Trop lent : la rame rebondit et recule de 60 m pour reprendre de l'élan, mais la barricade est fissurée : plus le choc a été fort, moins il faudra de vitesse au coup suivant. Attention au poids : une rame bondée accélère mal et aura du mal à l'atteindre.
 - **Grill d'aiguillages** : certains tunnels, plus longs, enchaînent 5 à 7 aiguilles très rapprochées. Les aiguilles se suivent tous les ~60 m et chacune s'annonce au dernier moment (AIGUILLE 2/5 · → DÉVIÉ 30 · puis ←) : choisissez ← direct ou → dévié. La manœuvre est quasi instantanée mais l'aiguille se verrouille à 10 m ; dès qu'elle est verrouillée, ← / → **présélectionnent la suivante**, d'après le « puis » du bandeau. En mode feu, la voie déviée n'a pas de limite de vitesse : il suffit de choisir la bonne direction, et un tunnel à aiguillages n'a ni virage ni profil de vitesse. +25 par aiguille bien prise, +60 pour un grill sans faute ; une erreur oblige à reculer. Bifurcations et traversées restent présentes (pas d'aiguille à manœuvrer à pied).
 - **Ni veille automatique ni klaxon** (et donc plus de chien sur la voie).
 - **Fin du monde, plus de service** : aucun incident voyageur (malaise, bagage, bagarre, pickpocket, fêtard, alarme, voyageur sur la voie), ni travaux ni régulation du PCC. Restent la foule de réfugiés, les coupures d'éclairage et les signaux.
