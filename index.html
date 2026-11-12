@@ -19,7 +19,7 @@
 const cv = document.getElementById('c');
 const g = cv.getContext('2d');
 const W = 384, H = 216, VIEW_H = 170;
-const VERSION = 'v1.6 · classement et médailles';
+const VERSION = 'v1.8 · vague de feu';
 let RES = 2;
 
 // Remplit la fenêtre en gardant le 16:9, avec un facteur entier en pixels
@@ -96,7 +96,23 @@ const PER = 0;   // un seul mode de jeu : l'heure de pointe (la difficulté vien
 let T0 = PERIODS[PER].t0;
 const VMAX = 80 / 3.6;          // vitesse maximale de la rame
 const REF_VMAX = 70 / 3.6;      // vitesse de la rame « de référence » sur laquelle l'horaire est calculé
-const CAP = 300, CAR_CAP = CAP / 5;   // capacité de la rame / par voiture (assez pour que patienter à quai fasse monter plus de monde)
+// mode de jeu : 'classic' (service à l'heure) ou 'fire' (vague de feu : fuir jusqu'au terminus avec un maximum de voyageurs)
+let GM = 'classic';
+try { GM = localStorage.getItem('dm_mode') === 'fire' ? 'fire' : 'classic'; } catch (e) {}
+const FIRE = () => GM === 'fire';
+const modeId = id => (FIRE() ? 'fire_' : '') + id;   // records et classements séparés par mode
+let CAP = 200, CAR_CAP = CAP / 5;
+// fioles : chaque voiture se remplit comme une fiole, avec une zone verte à viser ; au-delà de 100 %, ça déborde (jusqu'à +15 %)
+const VIAL = () => [0.6, 0.85], OVF = 1.0;   // une voiture ne dépasse jamais 100 %   // service normal seulement (en fuite, on embarque un maximum de monde)
+const vialF = c => S.cars[c] / CAR_CAP;
+const CAR_VIS = () => FIRE() ? 320 : CAR_CAP;   // échelle d'affichage du remplissage (fuite : pas de capacité, une voiture « bien pleine » ≈ 320)
+const carFill = c => S.cars[c] / CAR_VIS();
+// fuite : le poids. Chaque voyageur alourdit la rame, et une rame mal répartie accélère encore moins bien
+const W_REF = 1100;
+const imbalance = () => { const mx = Math.max(...S.cars), mn = Math.min(...S.cars); return mx < 20 ? 0 : (mx - mn) / mx; };
+const tractionF = () => FIRE() ? (1 - 0.45 * Math.min(1.2, S.load / W_REF)) * (1 - 0.3 * imbalance()) : 1;
+const carShut = c => !!(S.carShut && S.carShut[c]);
+const vialState = c => { const f = vialF(c), [a, b] = VIAL(); return f > 1.0001 ? 'over' : f >= a && f <= b + 0.0001 ? 'ok' : 'low'; };   // capacité de la rame / par voiture (assez pour que patienter à quai fasse monter plus de monde)
 const carOf = dz => Math.min(4, Math.floor(dz / 15));
 const DOORS = []; for (let car = 0; car < 5; car++) DOORS.push(car * 15 + 4, car * 15 + 11);
 const COLORS = ['#c0392b','#2e86c1','#27ae60','#d4ac0d','#8e44ad','#e67e22','#5d6d7e','#ecf0f1','#1abc9c','#a04000','#34495e'];
@@ -168,8 +184,13 @@ function mkPerson(p, x) {
   else if (kind === 'wheel') { pp.kind = 'wheel'; pp.slow = 0.7; if (pp.acc !== 'headphones') pp.acc = null; }
   return pp;
 }
+// zombie : peau verdâtre, vêtements sales et déchirés, démarche lente, yeux rouges
+const ZOMBIE_LOOK = () => ({ kind: 'adult', kid: null, k: pick(['#8fa07a', '#7d9470', '#9aa88a', '#a3a98a']), c: pick(['#3a3a2e', '#4a3e36', '#2e3a34', '#5a4a3a']),
+  pants: pick(['#2a2a24', '#3a342c']), hair: pick(['#3a3a30', '#2a2620', '#5a5a50']), hat: null, glasses: false, scarf: null, acc: null, acc2: null,
+  party: false, suspect: false, slow: 0.6, zombie: true, outfit: pick(['tshirt', 'coat', 'hoodie']) });
+const mkZombie = (p, x) => Object.assign(mkPerson(p, x), ZOMBIE_LOOK());
 // apparence à conserver quand un voyageur reste à quai
-const LOOK_KEYS = ['kind', 'outfit', 'c', 'k', 'h', 'hair', 'hairStyle', 'hat', 'beard', 'glasses', 'scarf', 'pants', 'shoe', 'bag', 'tights', 'acc', 'acc2', 'kid', 'party', 'seed', 'build', 'slow'];
+const LOOK_KEYS = ['zombie', 'kind', 'outfit', 'c', 'k', 'h', 'hair', 'hairStyle', 'hat', 'beard', 'glasses', 'scarf', 'pants', 'shoe', 'bag', 'tights', 'acc', 'acc2', 'kid', 'party', 'seed', 'build', 'slow'];
 const lookOf = m => Object.fromEntries(LOOK_KEYS.map(k => [k, m[k]]));
 let HELP_SKULL = false;
 try { HELP_SKULL = localStorage.getItem('dm_skull') === '1'; } catch (e) {}
@@ -194,7 +215,8 @@ function buildLine() {
   const L = LN();
   let p = 0;
   STATIONS.forEach((s, i) => {
-    if (i > 0) { p += s.dist; s.arr = STATIONS[i - 1].dep + Math.round(schedLeg(s.dist) * L.tight + 1.5); }
+    s.grill = FIRE() && i >= 2 && Math.random() < 0.45;   // fuite : long tunnel avec un grill d'aiguillages
+    if (i > 0) { p += s.grill ? Math.max(s.dist + 200, 530 + (STATIONS[i - 1].zombie ? 90 : 0)) : s.dist; s.arr = STATIONS[i - 1].dep + Math.round(schedLeg(s.dist) * L.tight + 1.5); }
     else s.arr = T0;
     s.pos = p; s.dep = s.arr + (i === 0 ? 25 : L.dwell);
     s.baseArr = s.arr; s.baseDep = s.dep;
@@ -202,20 +224,22 @@ function buildLine() {
     s.res = { pen: 0, inc: [], dt: null, err: null, pts: 0, skipped: false, board: 0, left: 0, offer: 0 };
     s.people = [];
     s.crowd = false; s.acc = 0;
-    const n = Math.round(s.aff * PERIODS[PER].affMul * L.aff * (17 + Math.random() * 8));
+    const n = Math.round(s.aff * PERIODS[PER].affMul * L.aff * (17 + Math.random() * 8) * (FIRE() ? 3 : 1.7));   // fuite : toute la ville se réfugie dans le métro ; service normal : quais bien garnis
     // dans 3 stations sur 4, la foule s'agglutine près d'un accès : une voiture bondée, une presque vide
     s.hot = Math.random() < 0.75 ? Math.floor(Math.random() * 5) : -1;
     const wts = [0, 1, 2, 3, 4].map(c => s.hot < 0 ? 1 : c === s.hot ? 6 : Math.abs(c - s.hot) === 1 ? 1.4 : Math.abs(c - s.hot) >= 3 ? 0.1 : 0.45);
     s.wts = wts;
-    for (let k = 0; k < n; k++) s.people.push(mkPerson(p - platformZ(wts), 2.4 + Math.random() * 3.2));
+    s.zombie = false;
+    if (FIRE() && i > 1 && i < STATIONS.length - 1 && !STATIONS[i - 1].zombie && Math.random() < 0.18 + 0.1 * LINE) s.zombie = true;
+    for (let k = 0; k < n; k++) s.people.push((s.zombie ? mkZombie : mkPerson)(p - platformZ(wts), 2.4 + Math.random() * 3.2));
   });
 }
 
 // ---------- État ----------
 let S;
 let BEST = 0, STARS = 0;
-function loadBest() { try { BEST = +localStorage.getItem('dm_best_' + LN().id) || 0; STARS = +localStorage.getItem('dm_stars') || 0; } catch (e) {} }
-function saveBest() { try { localStorage.setItem('dm_best_' + LN().id, String(BEST)); localStorage.setItem('dm_stars', String(STARS)); localStorage.setItem('dm_line', String(LINE)); } catch (e) {} }
+function loadBest() { try { BEST = +localStorage.getItem('dm_best_' + modeId(LN().id)) || 0; STARS = +localStorage.getItem('dm_stars') || 0; } catch (e) {} }
+function saveBest() { try { localStorage.setItem('dm_best_' + modeId(LN().id), String(BEST)); localStorage.setItem('dm_mode', GM); localStorage.setItem('dm_stars', String(STARS)); localStorage.setItem('dm_line', String(LINE)); } catch (e) {} }
 loadBest();
 
 // ===== missions =====
@@ -253,13 +277,17 @@ function reset(mode) {
   S = { mode, pos: 0, v: 0, clock: T0, cur: 0, next: 1, phase: 'dwell', doors: 1,
         alerted: false, buzzT: 0, msgs: [], score: 0, mp: [], t: 0, warnT: 0, hintT: 0, endT: -1,
         combo: 0, base: 0, pax: 0, paxOffer: 0, load: 0, cars: [0, 0, 0, 0, 0], blockers: [0, 1, 2, 3, 4].map(() => mkPerson(0, 0)), out: 0, trafSum: 0, trafT: 0, trafBonus: 0, trafShow: 0, trafDown: 0, trafLvl: -1, trafMsgT: 0, fullWarn: false, pops: [], recap: null, fx: null, inc: null, limit: 0, overT: 0, sigPos: null, sigRed: 0, alarm: null, alarmAt: 0, newRecord: false, vacT: 35, vacAlert: 0, vacBeep: 0, radioT: 30, runners: 0, waves: 0, waveT: 0, over: null, missed: 0, trafWarn: false, trace: [], brakeF: 0, schedShow: 0, entryDelta: null, tickT: 0, tickHi: false, gap: 999, vperm: 99, gapT: 0, gapArmed: true, ebrake: false, person: null, dog: null, malaise: null, cab: null, dirtyCar: -1, dirtyKeep: false, cleanT: 0, medicT: 0, medicCar: 0, medicKind: 'medic', blackout: 0, blackT: 0, beepT: 0, secLost: 0, legPen: 0, rConfirm: 0, help: false, tuto: -1, tutoT: 0,
-        missions: pickMissions(), missionShow: 0, pstreak: 0, precCount: 0, suspects: [], caught: 0, suspectAt: -1, holderAt: -1, holderPending: false, radio: 0, holdT: 0, annonce: 0, annCd: 0, theft: null };
+        missions: FIRE() ? [] : pickMissions(), missionShow: 0, fire: null, saved: 0, lost: 0, pstreak: 0, precCount: 0, suspects: [], caught: 0, suspectAt: -1, holderAt: -1, holderPending: false, radio: 0, holdT: 0, annonce: 0, annCd: 0, theft: null, unload: null, note: 0 };
+  CAP = FIRE() ? 1e6 : 200; CAR_CAP = CAP / 5;   // fuite : aucune limite, on s'entasse ; seul le poids freine la rame
+  if (FIRE()) S.fire = { z: -FIRE_START, v: 0, surge: false, safe: false, warn: 0, rumbleT: 0 };
   STATIONS[0].served = true;
   setupMirror(STATIONS[0]);
   planEvents(STATIONS[0]);
 }
 
 function msg(text, col = '#ffffff', life = 2.8) {
+  const same = S.msgs.find(m => m.text === text);   // déjà affiché : on le prolonge au lieu de le doubler
+  if (same) { same.t = 0; same.life = Math.max(same.life, life); return; }
   S.msgs.push({ text, col, life, t: 0 });
   if (S.msgs.length > 3) S.msgs.shift();
 }
@@ -273,9 +301,11 @@ function pen(pts, text) {
 }
 
 // ---------- Barème : 3 étoiles par station, sécurité, médailles ----------
-const MEDALS = [[2000, 'BRONZE', '#d08a4a'], [4500, 'ARGENT', '#c8d0dc'], [8000, 'OR', '#ffd75e']];
-const medalOf = sc => { let m = null; MEDALS.forEach(x => { if (sc >= x[0]) m = x; }); return m; };
-const nextMedal = sc => MEDALS.find(x => sc < x[0]) || null;
+const MEDALS_C = [[2000, 'BRONZE', '#d08a4a'], [4500, 'ARGENT', '#c8d0dc'], [8000, 'OR', '#ffd75e']];
+const MEDALS_F = [[6000, 'BRONZE', '#d08a4a'], [12000, 'ARGENT', '#c8d0dc'], [18000, 'OR', '#ffd75e']];
+const MEDS = () => FIRE() ? MEDALS_F : MEDALS_C;
+const medalOf = sc => { let m = null; MEDS().forEach(x => { if (sc >= x[0]) m = x; }); return m; };
+const nextMedal = sc => MEDS().find(x => sc < x[0]) || null;
 // médailles par catégorie : 0 aucune, 1 bronze, 2 argent, 3 or
 const CAT = [['PONCTUALITÉ', 'à l\'heure'], ['AIGUILLAGES', 'sans faute'], ['VOYAGEURS', 'servis et en sécurité']];
 const catLevel = r => r === null ? -1 : r >= 0.95 ? 3 : r >= 0.75 ? 2 : r >= 0.5 ? 1 : 0;
@@ -453,10 +483,16 @@ const sfxBad = () => beep(130, 0.35, 'sawtooth', 0.06);
 
 // ---------- Rétro (passagers vus dans le rétroviseur) ----------
 function setupMirror(st) {
-  S.mp = [];
+  S.mp = []; S.carShut = [false, false, false, false, false];
   const si = STATIONS.indexOf(st), last = si === STATIONS.length - 1;
   // descente : une part de la rame, plus forte dans les grosses stations, tout le monde au terminus
-  const nOut = si === 0 ? 0 : last ? S.load : Math.min(S.load, Math.round(S.load * (0.2 + 0.16 * st.aff) + 3 + Math.random() * 5));
+  if (last && FIRE()) {   // abri : un défilé de voyageurs à l'écran, le décompte exact est tenu par updateUnload
+    const nv = Math.min(S.load, 80), step = unloadDur(S.load) / Math.max(1, Math.ceil(nv / DOORS.length));
+    for (let i = 0; i < nv; i++) { const door = DOORS[i % DOORS.length];
+      S.mp.push(Object.assign(mkPerson(0, 0), { st: 'out', cosm: true, door, z: door, x: 0.1, sp: 1.3 + Math.random() * 0.4, t: 0.3, delay: 0.4 + Math.floor(i / DOORS.length) * step + Math.random() * 0.2, walk: 0 })); }
+    st.res.out = S.load; return;
+  }
+  const nOut = si === 0 ? 0 : last ? S.load : FIRE() ? 0 : Math.min(S.load, Math.round(S.load * (0.2 + 0.16 * st.aff) + 3 + Math.random() * 5));
   const perDoor = {}, left = S.cars.slice();
   for (let i = 0; i < nOut; i++) {
     // on choisit une voiture au prorata de son remplissage
@@ -479,15 +515,15 @@ function setupMirror(st) {
 }
 // un voyageur arrive sur le quai par un accès (escalier avant, milieu ou arrière)
 function spawnArrival(st, extra) {
-  if (!extra && S.mp.filter(m => m.st === 'walk').length >= 75) return;
+  if (!extra && S.mp.filter(m => m.st === 'walk').length >= (FIRE() ? 170 : 75)) return;
   const z = st.wts && Math.random() < 0.7 ? platformZ(st.wts) : pick([-2, 37, 79]) + Math.random() * 2;
   const door = DOORS.reduce((a, b) => Math.abs(b - z) < Math.abs(a - z) ? b : a);
-  S.mp.push(Object.assign(mkPerson(0, 0), { st: 'walk', door, z, x: 4.2 + Math.random() * 0.6, side: Math.random() < 0.5 ? -1 : 1,
+  S.mp.push(Object.assign(st.zombie ? mkZombie(0, 0) : mkPerson(0, 0), { st: 'walk', door, z, x: 4.2 + Math.random() * 0.6, side: Math.random() < 0.5 ? -1 : 1,
     sp: 1.2 + Math.random() * 0.6, delay: 0, walk: 0, fresh: true }, extra || {}));
   st.res.offer++; S.paxOffer++;
 }
 function planEvents(st) {
-  const P = LN(), last = STATIONS.indexOf(st) === STATIONS.length - 1;
+  const P = LN(), last = STATIONS.indexOf(st) === STATIONS.length - 1 || st.zombie || FIRE();   // fuite : plus de pickpocket ni de fêtard   // station infestée : ni pickpocket ni fêtard
   S.suspectAt = !last && Math.random() < P.suspect ? S.clock + 3 + Math.random() * 8 : -1;
   S.holderAt = !last && Math.random() < P.holder ? S.clock + 4 + Math.random() * 7 : -1;
   S.holderPending = false;
@@ -504,9 +540,10 @@ function speak(text, opts = {}) {
   } catch (e) {}
 }
 const PCC_LINES = n => [`Ligne ${n}, à toutes les rames : trafic chargé, respectez les horaires.`, `P C C à rame douze, bien reçu, vous pouvez repartir.`, `Ligne ${n} : régulation en cours, espacement normal.`, `Rame sept, signalez-vous à l'approche du terminus.`, `Ligne ${n}, information voyageurs : affluence importante en station.`];
+const PCC_FIRE = ['À toutes les rames… si quelqu\'un m\'entend… rejoignez l\'abri.', 'Ici le P C C… nous évacuons… bonne chance.', 'Rame sept… plus de réponse… ', 'Le feu a atteint la surface… ne vous arrêtez pas.'];
 function pccChatter() {
   noise(0.25, 0.06, 'bandpass', 1800, 2); beep(1400, 0.05, 'square', 0.03);
-  setTimeout(() => speak(pick(PCC_LINES(LN().num)), { rate: 1.15, pitch: 0.85, vol: 0.35 }), 250);
+  setTimeout(() => speak(pick(FIRE() ? PCC_FIRE : PCC_LINES(LN().num)), { rate: 1.15, pitch: 0.85, vol: 0.35 }), 250);
   setTimeout(() => noise(0.2, 0.05, 'bandpass', 1800, 2), 3800);
 }
 function chime() { [659, 523, 784].forEach((f, i) => beep(f, 0.35, 'sine', 0.06, i * 0.22)); }
@@ -623,10 +660,11 @@ function updateMirror(dt) {
     if (m.delay > 0) { if (open || m.st !== 'out') m.delay -= dt; continue; }
     if (m.st === 'walk') {
       if (!open || S.alerted) { m.halt = S.alerted; continue; }   // après le signal sonore : on ne monte plus
-      if (S.cars[carOf(m.door)] >= CAR_CAP || carOf(m.door) === S.dirtyCar) {
-        // voiture bondée (ou souillée) : on cherche une porte d'une autre voiture
-        const alt = DOORS.filter(dz => S.cars[carOf(dz)] < CAR_CAP && carOf(dz) !== S.dirtyCar).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
-        if (alt !== undefined && Math.abs(alt - m.z) < (m.spread ? 40 : 8)) m.door = alt;
+      const mc = carOf(m.door), shut = carShut(mc);
+      if (shut || S.cars[mc] >= CAR_CAP || mc === S.dirtyCar) {
+        // voiture pleine, fermée (fiole bouchée) ou souillée : on cherche une porte d'une autre voiture
+        const alt = DOORS.filter(dz => { const cc = carOf(dz); return S.cars[cc] < CAR_CAP && cc !== S.dirtyCar && !carShut(cc); }).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
+        if (alt !== undefined && Math.abs(alt - m.z) < 40) m.door = alt;   // voiture pleine ou fermée : on file vers la porte ouverte la plus proche, dans la voiture voisine
         else {
           m.halt = true;
           if (S.load >= CAP && !S.fullWarn) { S.fullWarn = true; msg('Rame pleine ! Plus personne ne peut monter', '#ff6b5b', 3); }
@@ -639,14 +677,21 @@ function updateMirror(dt) {
         // on laisse descendre, ou on attend son tour : une personne à la fois dans l'encadrement
         moveTo(m, m.door + m.side * (1.0 + (hsh(m.seed * 1000 | 0, 7) * 1.6)), 0.6 + hsh(m.seed * 1000 | 0, 8) * 1.4, dt);
       } else if (moveTo(m, m.door, 0.25, dt)) {
-        m.st = 'door'; m.t = 0.45;
+        m.st = 'door'; m.t = 0.3;   // on monte vite
         if (S.holderPending && !m.suspect) { S.holderPending = false; m.holder = true; m.t = 25; }   // fêtard qui retient la porte
       }
     } else if (m.st === 'door') {
       m.t -= dt;
       if (m.t <= 0 && m.fight) { m.st = 'gone'; continue; }
+      if (m.t <= 0 && m.zombie) {
+        m.st = 'in'; const c = carOf(m.door), lose = Math.min(S.cars[c], 6);
+        S.cars[c] -= lose; S.load -= lose; S.lost += lose; S.score -= 40; STATIONS[S.cur].res.zbit = (STATIONS[S.cur].res.zbit || 0) + lose;
+        pop(m.door, `☣ -${lose}`, '#9aff6a'); beep(140, 0.25, 'sawtooth', 0.06); noise(0.3, 0.2, 'bandpass', 400, 3);
+        continue;
+      }
+      if (m.t <= 0 && !FIRE() && S.cars[carOf(m.door)] >= CAR_CAP) { m.st = 'walk'; m.x = 0.7; continue; }   // voiture pleine entre-temps : il repart vers la porte voisine
       if (m.t <= 0) {
-        m.st = 'in'; S.pax++; S.load++; S.cars[carOf(m.door)]++; S.score += 5; STATIONS[S.cur].res.board++;
+        m.st = m.holder ? 'in' : 'inside'; m.t = 0.4; S.pax++; S.load++; S.cars[carOf(m.door)]++; S.score += 5; STATIONS[S.cur].res.board++;
         if (m.suspect) S.suspects.push({ car: carOf(m.door), pending: false });
         if (S.pax >= LN().pax) mDone('pax');
         pop(m.door, m.runner ? '+5 ★' : '+1', m.runner ? '#ffd75e' : '#7dff8a');
@@ -656,8 +701,11 @@ function updateMirror(dt) {
       if (!open) continue;
       m.t -= dt; m.x = Math.min(0.5, m.x + dt);
       if (m.t <= 0 && m.extra) { m.st = 'leave'; m.tz = -4; m.tx = 3.2; m.sp = 1.1; continue; }
+      if (m.t <= 0 && m.cosm) { m.st = 'leave'; m.tz = Math.random() < 0.5 ? -4 : 82; m.tx = 2.8 + Math.random() * 1.6; m.sp = 1.3 + Math.random() * 0.4; continue; }
       if (m.t <= 0) { m.st = 'leave'; S.load = Math.max(0, S.load - 1); S.cars[carOf(m.door)] = Math.max(0, S.cars[carOf(m.door)] - 1); S.out++; pop(m.door, '-1', '#7fd4ff');
         m.tz = Math.random() < 0.5 ? -4 : 82; m.tx = 2.8 + Math.random() * 1.6; m.sp = 1.2 + Math.random() * 0.4; }
+    } else if (m.st === 'inside') {   // il s'enfonce dans la voiture et disparaît dans la foule
+      m.t -= dt; m.walk += dt * 8; if (m.t <= 0) m.st = 'gone';
     } else if (m.st === 'leave') {
       if (Math.abs(m.x - m.tx) > 0.05) moveTo(m, m.z + Math.sign(m.tz - m.z) * 0.3, m.tx, dt);
       else if (moveTo(m, m.tz, m.tx, dt)) m.st = 'gone';
@@ -670,7 +718,8 @@ const blocked = () => busyDoor() !== undefined;
 
 // ---------- Entrées ----------
 addEventListener('keydown', e => {
-  const k = e.key.toLowerCase();
+  // chiffres : on lit la touche physique (sur un clavier AZERTY, « 1 » sans Maj donne « & »)
+  const k = /^(Digit|Numpad)[0-9]$/.test(e.code || '') ? e.code.slice(-1) : e.key.toLowerCase();
   if (['enter', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
   if (e.repeat && (k === 'p' || k === 'enter')) return;
   if (k === 'f' && !e.repeat) { toggleFullscreen(); return; }
@@ -696,6 +745,12 @@ addEventListener('keydown', e => {
       LINE = k === 'arrowleft' ? (LINE + nL - 1) % nL : k === 'arrowright' ? (LINE + 1) % nL : +k - 1;
       saveBest(); reset('title'); beep(660, 0.06, 'square', 0.04);
     }
+    if (k === 'arrowup' || k === 'arrowdown') {   // choix du mode : service normal / vague de feu
+      GM = GM === 'fire' ? 'classic' : 'fire'; saveBest(); reset('title');
+      TITLE.best = LINES.map(Ln => { try { return +localStorage.getItem('dm_best_' + modeId(Ln.id)) || 0; } catch (e) { return 0; } });
+      TITLE.modeT = 0; beep(GM === 'fire' ? 330 : 660, 0.08, 'square', 0.05); if (GM === 'fire') noise(0.5, 0.15, 'lowpass', 300, 0.7);
+      return;
+    }
     if (k === 'c') { TITLE.rank = !TITLE.rank; beep(TITLE.rank ? 880 : 520, 0.05, 'square', 0.04); return; }
     if (TITLE.rank && k === 'escape') { TITLE.rank = false; return; }
     if (k === 'enter' || k === 't') { TITLE.rank = false; startService(k === 't'); }
@@ -707,10 +762,11 @@ addEventListener('keydown', e => {
     else { S.rConfirm = S.t + 2.5; msg('Recommencer ? Appuyez encore sur R', '#ffb35e', 2.5); }
     return;
   }
-  if (S.mg && k !== 'escape') { if (k === ' ' && !e.repeat) mgHit(); return; }
+  if (S.mg && k !== 'escape') { if (!e.repeat) mgHit({ arrowleft: 'L', q: 'L', arrowdown: 'D', s: 'D', arrowup: 'U', z: 'U', arrowright: 'R', d: 'R' }[k]); return; }
   if (k === 'e' && !e.repeat && S.mode === 'running') { if (canManual()) startManual(); else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') msg(S.v > 0 ? 'Arrêtez d\'abord la rame' : 'Approchez-vous du signal de l\'aiguille', '#ffd75e', 2); return; }
   if ((k === 'arrowleft' || k === 'arrowright') && S.mode === 'running') { chooseDir(k === 'arrowleft' ? 'D' : 'G'); return; }
   if (k === ' ') { vacmaAck(); return; }
+  if (k === 'k' && FIRE()) return;   // fuite : pas de klaxon
   if (k === 'k') {
     sfxHorn(); S.hornT = 0.7;
     const pe = S.person;
@@ -725,6 +781,7 @@ addEventListener('keydown', e => {
   }
   if (k === 'v') { S.radio = 0; S.annonce = S.annonce ? 0 : 5; if (S.annonce) beep(900, 0.05, 'sine', 0.04); return; }
   if (S.annonce && (k === '1' || k === '2')) { doAnnonce(+k); return; }
+  if (['1', '2', '3', '4', '5'].includes(k) && S.mode === 'running' && (S.phase === 'dwell' || S.phase === 'alert') && !e.repeat) { toggleCar(+k - 1); return; }
   if (k === 'a') { S.annonce = 0; radioCall(); return; }
   if (k === 'escape') { if (S.radio || S.annonce) { S.radio = 0; S.annonce = 0; } else if (S.mode === 'running' && !S.over) setPause(true); return; }
   if (k === 'm') { S.missionShow = 5; return; }
@@ -736,7 +793,7 @@ addEventListener('keydown', e => {
   } else if (k === 'enter') {
     if (S.medicT > 0 && (S.phase === 'dwell' || S.phase === 'alert')) { msg(`${S.medicKind === 'bag' ? 'Inspection du bagage' : 'Secours en intervention'} : encore ${Math.ceil(S.medicT)} s`, '#ff8a7a', 2); return; }
     if ((S.phase === 'dwell' || S.phase === 'alert') && S.endT < 0) {
-      if (!S.alerted) pen(-15, 'Fermeture sans signal sonore !');
+      if (!S.alerted && !STATIONS[S.cur].zombie) pen(-15, 'Fermeture sans signal sonore !');
       S.phase = 'closing'; sfxDoorsClosing();
     }
   }
@@ -766,9 +823,15 @@ function drawPause() {
 }
 function startService(tuto) {
   stopMusic();
-  S.mode = 'running'; S.pos = 0; S.v = 0; msg(`Ligne ${LN().num} · ${STATIONS[0].name} — en voiture !`, '#ffd75e');
-  let seen = false; try { seen = localStorage.getItem('dm_tuto') === '1'; } catch (err) {}
-  if (tuto || !seen) { S.tuto = 0; S.tutoT = 0; }
+  S.mode = 'running'; S.pos = 0; S.v = 0;
+  if (FIRE()) {
+    msg('🔥 Une vague de feu remonte la ligne ! Embarquez un maximum de voyageurs et fuyez jusqu\'au terminus.', '#ffb35e', 6);
+    setTimeout(() => { if (S.mode === 'running' && S.fire) msg(`Abri : ${STATIONS[STATIONS.length - 1].name}. Chaque seconde à quai fait monter du monde… et rapproche le feu.`, '#ffd75e', 6); }, 6500);
+  } else {
+    msg(`Ligne ${LN().num} · ${STATIONS[0].name} — en voiture !`, '#ffd75e');
+    let seen = false; try { seen = localStorage.getItem('dm_tuto') === '1'; } catch (err) {}
+    if (tuto || !seen) { S.tuto = 0; S.tutoT = 0; }
+  }
   beep(523, 0.08, 'square', 0.05); beep(784, 0.14, 'square', 0.05, 0.08);
 }
 const keyTraction = () => keys['z'] || keys['w'] || keys['arrowup'];
@@ -782,7 +845,7 @@ function arrive(st, err) {
   const ad = Math.abs(dt), ae = Math.abs(err);
   // la note ne juge QUE la précision de l'arrêt (avec tolérance) ; l'horaire est noté à part
   const prec = ae <= 0.5 ? 100 : Math.max(0, Math.round(100 - 25 * (ae - 0.5)));
-  const punct = ad <= 1 ? 100 : Math.max(0, 100 - 10 * (ad - 1));   // −10 par seconde d'écart (avance comme retard)
+  const punct = FIRE() ? 0 : ad <= 1 ? 100 : Math.max(0, 100 - 10 * (ad - 1));   // −10 par seconde d'écart (avance comme retard)
   let gr;
   if (ae <= 0.5) gr = { t: 'PARFAIT !', c: '#7dff8a', ok: true };
   else if (ae <= 1.5) gr = { t: 'TRÈS BIEN', c: '#9fe0ff', ok: true };
@@ -790,6 +853,8 @@ function arrive(st, err) {
   else gr = { t: 'RATÉ', c: '#ff6b5b', ok: false };
   gr.why = `Arrêt à ${ae.toFixed(1)} m ${err < 0 ? 'avant' : 'après'} la marque`;
   gr.time = dt > 2 ? [`Horaire : ${dt} s de retard`, ad > 8 ? '#ff6b5b' : '#ffd75e'] : dt < -2 ? [`Horaire : ${-dt} s d'avance`, ad > 8 ? '#ff6b5b' : '#ffd75e'] : ['Horaire : à l\'heure !', '#7dff8a'];
+  if (FIRE()) { const fg = Math.round(fireGap()); gr.time = [`Vague de feu à ${fg} m`, fireCol(fg)]; r.fireGap = fg; }
+  if (st.zombie) { gr.t = 'ZOMBIES !'; gr.c = '#9aff6a'; gr.ok = false; gr.time = ['Il ne fallait pas s\'arrêter ici !', '#9aff6a']; }
   S.combo = gr.ok ? S.combo + 1 : 0;
   S.pstreak = gr.t === 'PARFAIT !' ? S.pstreak + 1 : 0; if (S.pstreak >= 3) mDone('combo3');
   if (ae <= 1.5) { S.precCount++; if (S.precCount >= 5) mDone('precision5'); }
@@ -797,7 +862,7 @@ function arrive(st, err) {
   const mult = Math.max(1, S.combo);
   S.base += punct + prec;
   r.pts = (punct + prec) * mult; r.grade = gr.t; r.mult = mult; S.score += r.pts;
-  r.prec = prec; r.punct = punct; r.stars = { p: ae <= 1.5, t: ad <= 2, v: null };
+  r.prec = prec; r.punct = punct; r.stars = { p: ae <= 1.5, t: FIRE() ? null : ad <= 2, v: null };
   S.trace.push([-err, 0]);
   S.fx = { gr, mult, pts: r.pts, prec, punct, stars: r.stars, ae, err, dt, trace: S.trace.slice(), t: 0 };
   if (gr.t === 'PARFAIT !') { [523, 659, 784, 1047, 1319].forEach((f, i) => beep(f, 0.2, 'square', 0.06, i * 0.08)); beep(1568, 0.6, 'triangle', 0.07, 0.42); }
@@ -806,12 +871,14 @@ function arrive(st, err) {
   if (err > 3) pen(-20, 'Dépassement de la marque');
   if (ae > 3) {   // arrêt raté : plus de 3 m de la marque
     S.missed++;
-    if (S.missed >= MISS_MAX) gameOver(`${MISS_MAX} arrêts ratés`, 'Arrêtez-vous à moins de 3 m de la marque STOP.');
+    if (S.missed >= MISS_MAX && !FIRE()) gameOver(`${MISS_MAX} arrêts ratés`, 'Arrêtez-vous à moins de 3 m de la marque STOP.');
+    else if (FIRE()) msg('Arrêt imprécis : les voyageurs courent jusqu\'aux portes', '#ffd75e', 3);
     else msg(`Arrêt raté : ${S.missed} / ${MISS_MAX} — au ${MISS_MAX}e, fin de partie`, '#ff6b5b', 4);
   }
   S.limit = 0; S.alarm = null; S.inc = null; S.theft = null; S.person = null; S.dog = null;
   if (S.blackout) { S.blackout = 0; msg('Éclairage rétabli', '#7dff8a', 2); }
-  if (S.malaise && S.malaise.shown) {
+  if (S.malaise && S.malaise.shown && st.zombie) { setTimeout(() => msg('Les secours ne peuvent pas intervenir dans une station infestée', '#ffb35e', 3), 900); }
+  else if (S.malaise && S.malaise.shown) {
     const extra = S.malaise.called ? 8 : 15;
     S.medicT = extra; S.medicCar = S.malaise.car; S.medicKind = 'medic';   // l'intervention fait prendre du retard
     setTimeout(() => msg(`🚑 Secours à bord de la V${S.medicCar + 1} : intervention ${extra} s${S.malaise ? '' : ''}`, '#ff8a7a', 4), 900);
@@ -850,6 +917,7 @@ function arrive(st, err) {
   }
   S.cab = null;
   st.served = true; setupMirror(st); st.people = [];
+  if (st.zombie) { st.res.zstop = true; setTimeout(() => msg('☣ ZOMBIES ! Fermez les portes tout de suite (⏎) : chaque zombie qui monte contamine 6 voyageurs !', '#9aff6a', 5), 600); for (let i = 0; i < 4; i++) beep(i % 2 ? 300 : 200, 0.15, 'sawtooth', 0.06, i * 0.18); }
   planEvents(st);
   S.mp.push(...cbExtra);
   // pickpockets restés à bord : vol signalé, ou débarquement prévu par radio
@@ -863,7 +931,13 @@ function arrive(st, err) {
   S.phase = 'dwell'; S.alerted = false; S.doors = 0; S.fullWarn = false;
   sfxDing(); setTimeout(sfxDoorsOpening, 500);
   if (S.next < STATIONS.length) S.sigPos = null;
-  if (S.next >= STATIONS.length) { S.endT = 9; msg('Fin de service à ' + st.name + ' : tout le monde descend.', '#ffd75e', 6); }
+  if (S.next >= STATIONS.length && FIRE()) {
+    S.saved = 0; S.endT = 99;   // la fin attend que tout le monde soit descendu
+    S.unload = { tot: S.load, n: 0, t: 0, done: false, dt: 0, rate: S.load / unloadDur(S.load), tick: -1 };
+    msg('Abri atteint ! Les portes blindées se ferment : tout le monde descend', '#7dff8a', 4);
+    [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.25, 'square', 0.06, i * 0.12));
+  }
+  else if (S.next >= STATIONS.length) { S.endT = 9; msg('Fin de service à ' + st.name + ' : tout le monde descend.', '#ffd75e', 6); }
 }
 
 // ---------- Premier service guidé : une consigne à la fois, validée par l'action du joueur ----------
@@ -931,6 +1005,11 @@ function lineRefPos(tau) {                 // position d'un train parfaitement �
 }
 const leadHead = () => (STATIONS[STATIONS.length - 1].baseArr - STATIONS[0].baseDep) / (STATIONS.length - 1) + 6;   // un cycle + 6 s : invisible tant qu'on est à l'heure
 function updateLeader(dt) {
+  if (FIRE()) {   // fuite : la voie devant est libre (mais le freinage d'urgence se relâche toujours à l'arrêt)
+    S.gap = 999; S.vperm = 99;
+    if (S.phase === 'drive' && S.ebrake) { S.v = Math.max(0, S.v - 6 * dt); if (S.v === 0) S.ebrake = false; }
+    return;
+  }
   S.gap = lineRefPos(S.clock + leadHead()) - TRAIN_LEN - S.pos;      // de notre avant à l'arrière du train précédent
   S.vperm = Math.sqrt(2 * GAP_DECEL * Math.max(0, S.gap - GAP_MARGIN));
   if (S.phase !== 'drive') { S.gapT = 0; return; }
@@ -1037,7 +1116,7 @@ function drawFillPanel(x, y, w, h) {
   // 5 voitures, de la tête (V1) à la queue (V5)
   const cw = (w - 10 - 4 * 3) / 5;
   for (let c = 0; c < 5; c++) {
-    const fill = Math.min(1, S.cars[c] / CAR_CAP), cx = x + 5 + c * (cw + 3), cy = y + 14, ch = 16;
+    const fill = Math.min(1, carFill(c)), cx = x + 5 + c * (cw + 3), cy = y + 14, ch = 16;
     const cc = fill >= 1 ? (Math.floor(S.t * 4) % 2 ? '#ff4a3a' : '#a01e14') : fill > 0.85 ? '#ffb35e' : fill > 0.6 ? '#ffd75e' : '#7dff8a';
     g.fillStyle = '#20242e'; g.fillRect(cx, cy, cw, ch);
     g.fillStyle = cc; g.fillRect(cx, cy + ch * (1 - fill), cw, ch * fill);
@@ -1063,16 +1142,49 @@ function drawDwellBar() {
   if (k) keycap(76, 1, k);
   // centre : quand partir (raccourci, et jamais plus large que la place libre)
   const room = W - 44 - 96;            // jusqu'à l'indicateur REC
-  if (S.next < STATIONS.length) {
+  if (S.next < STATIONS.length && S.fire) {
+    const gap = fireGap(), eta = Math.max(0, Math.floor(fireEta())), blink = Math.floor(S.t * 4) % 2;
+    const l = st.zombie ? '☣ ZOMBIES : FERMEZ LES PORTES !' : gap < 80 ? `PARTEZ ! Le feu est à ${Math.round(gap)} m` : `Vague de feu : ${Math.round(gap)} m, ≈ ${eta} s`;
+    txt(l, 96, 11, 12, gap < 80 ? (blink ? '#ffffff' : '#ff6b3a') : fireCol(gap), 'left', 'VT323', room);
+  } else if (S.next < STATIONS.length) {
     const toDep = Math.ceil(st.dep - S.clock), fc = departForecast(), blink = Math.floor(S.t * 4) % 2;
     let l, c;
     if (toDep > 0) { l = `Départ à l'heure dans ${toDep} s`; c = '#7dff8a'; }
     else if (fc <= 0) { l = `Partez ! marge ${Math.max(0, Math.floor(-fc))} s`; c = blink ? '#ffffff' : '#ffd75e'; }
     else { l = `Retard prévu : +${Math.ceil(fc)} s`; c = blink ? '#ff6b5b' : '#ff9a8a'; }
     txt(l, 96, 11, 12, c, 'left', 'VT323', room);
-  } else txt('Terminus : tout le monde descend', 96, 11, 12, '#cfd6e6', 'left', 'VT323', room);
+  } else txt(S.fire ? (S.unload && !S.unload.done ? `Descente : ${S.unload.n} / ${S.unload.tot} voyageurs` : `Abri atteint : ${S.saved} voyageurs sauvés`) : 'Terminus : tout le monde descend', 96, 11, 12, S.fire ? '#7dff8a' : '#cfd6e6', 'left', 'VT323', room);
 }
 // voyageurs qui attendent sur le quai, voiture par voiture
+// boucher / déboucher une fiole : on ferme (ou rouvre) les portes d'une seule voiture
+function toggleCar(c) {
+  if (!S.carShut) S.carShut = [false, false, false, false, false];
+  if (S.doors < 0.5) return;
+  if (!S.carShut[c] && S.mp.some(m => m.st === 'out' && carOf(m.door) === c)) { msg(`V${c + 1} : des voyageurs descendent encore`, '#ffb35e', 1.5); sfxBad(); return; }
+  S.carShut[c] = !S.carShut[c];
+  const f = Math.round(vialF(c) * 100), st = FIRE() ? 'low' : vialState(c);   // fuite : pas de dosage, on oriente seulement la foule
+  if (S.carShut[c]) { beep(st === 'ok' ? 988 : 520, 0.08, 'square', 0.04); noise(0.2, 0.08, 'lowpass', 700, 0.8); msg(`V${c + 1} fermée ${FIRE() ? `(${S.cars[c]} à bord)` : `à ${f} %`}${st === 'ok' ? ' : dans le vert !' : st === 'over' ? ' : elle déborde !' : ''}`, st === 'ok' ? '#7dff8a' : st === 'over' ? '#ff6b5b' : '#ffd75e', 1.6); }
+  else { beep(660, 0.06, 'square', 0.04); msg(`V${c + 1} rouverte`, '#9fe0ff', 1.2); }
+}
+// au départ : bilan des fioles (zone verte, débordement)
+function vialBilan() {
+  const [a, b] = VIAL(); let ok = 0, over = 0, pts = 0;
+  for (let c = 0; c < 5; c++) {
+    const st = vialState(c);
+    if (st === 'ok') { ok++; pts += 25; }
+    if (st === 'over') {
+      const ex = Math.round(S.cars[c] - CAR_CAP); over += ex;
+      if (FIRE()) { const dead = Math.ceil(ex / 2); S.cars[c] -= dead; S.load -= dead; S.lost += dead; STATIONS[S.cur].res.lost = (STATIONS[S.cur].res.lost || 0) + dead; }
+      else pts -= 8 * ex;
+    }
+  }
+  if (ok === 5) pts += 100;
+  S.score += pts; S.vialOk = (S.vialOk || 0) + ok; if (ok === 5) S.vialPerfect = (S.vialPerfect || 0) + 1;
+  STATIONS[S.cur].res.vial = ok;
+  if (ok === 5) { msg(`⚗ DOSAGE PARFAIT ! Les 5 voitures dans le vert (+${pts})`, '#7dff8a', 3.5); [784, 988, 1175, 1568].forEach((f, i) => beep(f, 0.12, 'square', 0.05, i * 0.08)); }
+  else if (over) msg(FIRE() ? `⚗ Débordement : ${Math.ceil(over / 2)} voyageurs étouffés` : `⚗ Débordement : ${over} voyageurs écrasés (${pts >= 0 ? '+' : ''}${pts})`, '#ff6b5b', 3);
+  else if (ok) msg(`⚗ ${ok} voiture${ok > 1 ? 's' : ''} sur 5 dans le vert (+${pts})`, '#9fe0ff', 2.5);
+}
 function quaiCrowd() {
   const n = [0, 0, 0, 0, 0];
   S.mp.forEach(m => { if (m.st === 'walk') n[carOf(m.door)]++; });
@@ -1089,6 +1201,9 @@ function drawHint() {
   else if (S.annonce) hint = 'ANNONCE : tapez 1 ou 2 — Échap pour annuler';
   else if (hold && S.holdT > 2.5) hint = `Quelqu'un retient la porte en V${carOf(hold.door) + 1} ! A : appel radio`;
   else if ((S.phase === 'dwell' || S.phase === 'alert') && S.alerted && blocked()) hint = `PORTE OCCUPÉE en V${carOf(busyDoor()) + 1} : attendez le cadre vert avant de fermer (⏎)`;
+  else if (S.phase !== 'drive' && STATIONS[S.cur] && STATIONS[S.cur].zombie && S.next < STATIONS.length) hint = '☣ ZOMBIES À QUAI : fermez les portes (⏎), sans attendre la sonnerie !';
+  else if (S.phase === 'dwell' && !FIRE() && !S.alerted && S.next < STATIONS.length && [0, 1, 2, 3, 4].some(c => vialState(c) === 'over' && !carShut(c))) { const c = [0, 1, 2, 3, 4].find(c => vialState(c) === 'over' && !carShut(c)); hint = `⚗ V${c + 1} DÉBORDE (${Math.round(vialF(c) * 100)} %) : touche ${c + 1} pour fermer ses portes !`; }
+  else if (S.phase === 'dwell' && !FIRE() && !S.alerted && S.next < STATIONS.length && [0, 1, 2, 3, 4].some(c => vialState(c) === 'ok' && !carShut(c))) { const c = [0, 1, 2, 3, 4].find(c => vialState(c) === 'ok' && !carShut(c)); hint = `⚗ V${c + 1} dans le vert : touche ${c + 1} pour la fermer et garder le bon dosage`; }
   else if (S.phase === 'dwell' && !S.alerted && S.annCd <= 0 && (() => { const c = quaiCrowd(); return c.max >= 10 && c.max >= 3 * c.min + 6; })()) {
     const c = quaiCrowd(); hint = `QUAI MAL RÉPARTI : foule en V${c.hi + 1}, V${c.lo + 1} presque vide — V puis 1 : « Répartissez-vous »`;
   }
@@ -1099,15 +1214,19 @@ function drawHint() {
   else if (S.cab && S.cab.shown && S.phase === 'drive' && S.cab.type === 'slip') hint = `SOL GLISSANT en V${S.cab.car + 1} : freinez en douceur, par petites touches sur S`;
   else if (S.cab && S.cab.shown && !S.cab.called && S.phase === 'drive') hint = { sick: 'VOYAGEUR MALADE', fight: 'BAGARRE', bag: 'BAGAGE ABANDONNÉ', vendor: 'VENDEUR À LA SAUVETTE' }[S.cab.type] + ` en V${S.cab.car + 1} : ` + { sick: 'A pour prévenir le PCC', fight: 'A pour appeler la sécurité', bag: 'A pour le signaler', vendor: 'A pour faire une annonce' }[S.cab.type];
   else if (S.malaise && S.malaise.shown) hint = `MALAISE en V${S.malaise.car + 1} : arrêt obligatoire à ${STATIONS[S.next].name}${S.malaise.called || S.malaise.expired ? '' : ' — A : prévenir le PCC'}`;
+  else if (S.phase === 'drive' && STATIONS[S.next] && STATIONS[S.next].zombie) hint = `☣ ${STATIONS[S.next].name} INFESTÉE DE ZOMBIES : ne vous arrêtez pas, traversez !`;
   else if (S.phase === 'drive' && STATIONS[S.next] && STATIONS[S.next].closed) hint = `${STATIONS[S.next].name} FERMÉE : traversez sans arrêt, 30 km/h max`;
   else if (S.mg) hint = '';
   else if (S.rev) hint = 'MAUVAIS ITINÉRAIRE : retour en marche arrière';
-  else if (canManual()) hint = 'E : descendre sur la voie pour manœuvrer l\'aiguille';
+  else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive' && !S.mg) hint = `AIGUILLE EN PANNE : arrêtez-vous avant le signal (${Math.max(0, Math.round(S.sw.sig - S.pos))} m)`;
   else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') hint = `AIGUILLE EN PANNE à ${Math.max(0, Math.round(S.sw.sig - S.pos))} m : arrêtez-vous avant le signal rouge`;
   else if (S.sw && S.sw.kind === 'merge' && swRed() && S.phase === 'drive') hint = 'SIGNAL JAUNE : un train traverse votre voie, ralentissez pour arriver quand le signal passe au vert';
   else if (S.sw && S.sw.kind === 'fork' && S.sw.limOn) hint = S.v * 3.6 > 31 ? `VOIE DÉVIÉE : 30 km/h ! Déraillement au-delà de ${30 + DERAIL}` : 'VOIE DÉVIÉE : 30 km/h sur l\'aiguille';
-  else if (S.sw && S.sw.kind === 'fork' && !S.sw.passed && S.sw.pos - S.pos < 200 && S.phase === 'drive') hint = S.sw.tgt === S.sw.want ? `BIFURCATION : direction ${S.sw.want === 'D' ? 'DIRECTE' : 'DÉVIÉE (30 km/h)'} sélectionnée${S.sw.fixT > 0 ? ', aiguille en mouvement…' : ''}` : `BIFURCATION : mauvaise direction sélectionnée ! ${S.sw.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}`;
-  else if (S.blackout) hint = 'COUPURE D\'ÉCLAIRAGE : suivez la courbe, les panneaux 50 / 25 / 10 et les bips';
+  else if (S.sw && S.sw.kind === 'fork' && !S.sw.passed && S.sw.pos - S.pos < 200 && S.phase === 'drive') hint = !S.sw.tgt ? `BIFURCATION : choisissez la direction ! ${S.sw.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}` : S.sw.tgt === S.sw.want ? `BIFURCATION : direction ${S.sw.want === 'D' ? 'DIRECTE' : FIRE() ? 'DÉVIÉE' : 'DÉVIÉE (30 km/h)'} sélectionnée${S.sw.fixT > 0 ? ', aiguille en mouvement…' : ''}` : `BIFURCATION : mauvaise direction sélectionnée ! ${S.sw.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}`;
+  else if (bendHere() && S.v * 3.6 > bendHere().lim + 1) hint = `TROP VITE DANS LE VIRAGE ! Déraillement au-delà de ${bendHere().lim + BEND_TOL} km/h : freinez (S)`;
+  else if (derailEnv(S.pos) < 900 && S.v * 3.6 > derailEnv(S.pos) + 0.5 && S.phase === 'drive') hint = 'HORS DE LA ZONE VERTE ! Freinez (S) ou vous déraillez';
+  else if (activeBend() && !bendHere()) hint = `VIRAGE à ${Math.round(activeBend().pos - S.pos)} m : ${activeBend().lim} km/h max, restez sous la courbe dans la zone verte`;
+  else if (S.blackout) hint = FIRE() ? 'COUPURE D\'ÉCLAIRAGE : suivez la courbe et les bips' : 'COUPURE D\'ÉCLAIRAGE : suivez la courbe, les panneaux 50 / 25 / 10 et les bips';
   else if (S.sigRed > 0) hint = 'Signal rouge : attendez le vert';
   else if (S.limit && S.v * 3.6 > S.limit + 1) hint = `TROP VITE ! Au-delà de ${S.limit + DERAIL} km/h, la rame déraille : freinez (S)`;
   else if (S.limit) hint = `Travaux : ne dépassez pas ${S.limit} km/h, sinon risque de déraillement`;
@@ -1121,7 +1240,7 @@ function drawSchedChip() {
   if (S.mode !== 'running' || S.phase !== 'drive' || S.next >= STATIONS.length || S.entryDelta !== null) return;
   const d = S.schedShow, [lab, col] = schedState(d), x = 146, y = 8, w = 66, h = 30;
   const late = d > 2, urgent = d > 8, pulse = 0.5 + 0.5 * Math.sin(S.t * (urgent ? 9 : 5));
-  g.fillStyle = late ? `rgba(${Math.round(40 + 60 * pulse * (urgent ? 1 : 0.5))},6,6,0.92)` : 'rgba(6,8,14,0.9)'; g.fillRect(x, y, w, h);
+  g.fillStyle = late ? `rgba(${Math.round(40 + 60 * pulse * (urgent ? 1 : 0.5))},6,6,0.8)` : 'rgba(6,8,14,0.6)'; g.fillRect(x, y, w, h);
   g.strokeStyle = col; g.lineWidth = late ? 1.5 + pulse : 1.5; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   txt(urgent ? 'EN RETARD : FONCEZ !' : 'HORAIRE', x + w / 2, y + 8, 8, urgent ? (Math.floor(S.t * 4) % 2 ? '#ffffff' : '#ffb3a8') : '#8fa0b8', 'center', 'VT323', w - 4);
   txt(lab, x + w / 2, y + 18, 12, col, 'center', 'VT323', w - 6);
@@ -1134,7 +1253,10 @@ function drawSchedChip() {
 
 // ---------- Veille automatique (VACMA) : prouver régulièrement qu'on est vigilant ----------
 function updateVacma(dt) {
+  if (FIRE()) { S.vacAlert = 0; return; }   // fuite : pas de veille automatique
   if (S.phase !== 'drive' || S.v < 1 || S.ebrake || S.mg || S.rev) { if (S.phase !== 'drive') S.vacAlert = 0; return; }
+  const w = S.sw;   // bifurcation ou grill d'aiguillages en cours : le conducteur a les mains occupées, la veille attend
+  if (w && w.kind === 'fork' && (!w.passed || w.chain > 0) && w.pos - S.pos < 200) { S.vacAlert = 0; S.vacT = Math.max(S.vacT, 12); return; }
   if (S.vacAlert > 0) {
     S.vacAlert -= dt; S.vacBeep -= dt;
     if (S.vacBeep <= 0) { beep(1040, 0.12, 'square', 0.05); S.vacBeep = 0.4; }
@@ -1164,13 +1286,244 @@ function gameOver(title, reason) {
 function drawGameOver() {
   const o = S.over; if (!o) return;
   const k = Math.min(1, o.t / 0.6), flash = o.t < 0.5 && Math.floor(o.t * 12) % 2;
-  g.fillStyle = flash ? 'rgba(255,40,20,0.55)' : `rgba(20,0,0,${0.75 * k})`; g.fillRect(0, 0, W, H);
+  if (S.fire && o.title.startsWith('Rattrapé')) {   // la vague engloutit la rame
+    const kk = Math.min(1, o.t / 1.4);
+    g.fillStyle = `rgba(255,${Math.round(200 - 120 * kk)},40,${0.5 * (1 - kk) + 0.1})`; g.fillRect(0, 0, W, H);
+    flameWall(-10, W + 10, H + 4, H * (0.4 + 1.3 * kk), S.t, 3);
+    g.fillStyle = `rgba(20,4,0,${0.6 * Math.max(0, (o.t - 1) / 1.2)})`; g.fillRect(0, 0, W, H);
+  } else { g.fillStyle = flash ? 'rgba(255,40,20,0.55)' : `rgba(20,0,0,${0.75 * k})`; g.fillRect(0, 0, W, H); }
   if (o.t < 0.25) return;
+  if (S.fire && o.title.startsWith('Rattrapé')) { g.fillStyle = 'rgba(12,3,0,0.72)'; g.fillRect(0, H / 2 - 32, W, 64); }
   txt('GAME OVER', W / 2, H / 2 - 12, 22, '#ff4a3a', 'center', '"Press Start 2P"');
   txt(o.title, W / 2, H / 2 + 10, 16, '#ffffff', 'center', 'VT323', W - 30);
   txt(o.reason, W / 2, H / 2 + 24, 12, '#ffb3a8', 'center', 'VT323', W - 30);
 }
 
+
+// ---------- Vague de feu (mode « fire ») ----------
+const FIRE_START = 230;                         // la vague part 230 m derrière le terminus de départ
+const FIRE_V = [5.4, 5.8, 6.2, 6.6];            // vitesse de base par ligne (m/s) : ~20 à 26 km/h
+const fireGap = () => S.fire ? S.pos - TRAIN_LEN - S.fire.z : 999;   // de la vague à l'arrière de la rame
+function updateFire(dt) {
+  const f = S.fire; if (!f || S.over) return;
+  if (S.next >= STATIONS.length && S.phase !== 'drive') {   // terminus : les portes blindées de l'abri se ferment
+    if (!f.safe) { f.safe = true; }
+    return;
+  }
+  const gap = fireGap();
+  // la vague avance à vitesse constante, mais rattrape son retard si on la distance trop (la tension ne retombe jamais)
+  const surge = f.surge ? gap > 280 : gap > 320;   // hystérésis : l'alerte ne clignote pas autour du seuil
+  if (surge && !f.surge && S.t > 5) msg('🔥 La vague s\'emballe : elle accélère !', '#ff8a3a', 3);
+  f.surge = surge;
+  f.v = FIRE_V[LINE] * (surge ? 1.9 : gap > 220 ? 1.25 : 1);
+  if (S.t > 3) f.z += f.v * dt;   // trois secondes de répit au tout début
+  // les stations englouties : les voyageurs restés sur le quai sont perdus
+  STATIONS.forEach((st, i) => {
+    if (st.burnt || f.z < st.pos - PL) return;
+    st.burnt = true;
+    if (st.zombie) { st.people = []; return; }
+    const n = st.people.length;
+    if (i <= S.cur && n > 0) { S.lost += n; st.res.lost = n; msg(`🔥 La vague atteint ${st.name} : ${n} voyageur${n > 1 ? 's' : ''} n'ont pas pu monter`, '#ff8a5b', 3.5); }
+    st.people = [];
+  });
+  if (gap <= 0) {
+    gameOver('Rattrapé par la vague de feu', S.load ? `${S.load} voyageurs à bord. Il fallait repartir plus tôt !` : 'Il fallait repartir plus tôt !');
+    return;
+  }
+  // alertes sonores quand elle se rapproche
+  if (gap < 120) {
+    f.rumbleT -= dt;
+    if (f.rumbleT <= 0) { f.rumbleT = 0.25 + gap / 160; noise(0.6, 0.05 + 0.25 * (1 - gap / 120), 'lowpass', 180 + Math.random() * 120, 0.7); }
+  }
+  const lv = gap < 40 ? 3 : gap < 80 ? 2 : gap < 140 ? 1 : 0;
+  if (lv > f.warn) {
+    if (lv === 1) msg('🔥 La vague est à moins de 140 m !', '#ffb35e', 2.5);
+    if (lv === 2) { msg('🔥 80 m ! Il faut partir !', '#ff6b5b', 2.5); for (let i = 0; i < 3; i++) beep(880, 0.08, 'square', 0.05, i * 0.15); }
+    if (lv === 3) { msg('🔥 LA VAGUE EST SUR NOUS !', '#ff3a2a', 2.5); for (let i = 0; i < 6; i++) beep(i % 2 ? 660 : 990, 0.08, 'sawtooth', 0.05, i * 0.1); }
+  }
+  if (lv > f.warn || gap > [0, 170, 110, 60][f.warn]) f.warn = lv;   // hystérésis : on ne répète pas l'alerte en boucle
+}
+// temps estimé avant que la vague n'atteigne l'arrière de la rame (rame à l'arrêt)
+const fireEta = () => S.fire && S.fire.v > 0 ? fireGap() / S.fire.v : 99;
+const fireCol = gap => gap < 40 ? '#ff3a2a' : gap < 80 ? '#ff6b3a' : gap < 140 ? '#ffb35e' : '#ffd75e';
+// pastille en haut de l'écran (remplace l'horaire)
+function drawFireChip() {
+  if (!S.fire || S.mode !== 'running' || S.phase !== 'drive') return;
+  const gap = fireGap(), x = 146, y = 8, w = 66, h = 38, col = fireCol(gap), pulse = 0.5 + 0.5 * Math.sin(S.t * (gap < 80 ? 10 : 4));
+  g.fillStyle = gap < 80 ? `rgba(${Math.round(60 + 70 * pulse)},14,4,0.85)` : 'rgba(10,6,4,0.65)'; g.fillRect(x, y, w, h);
+  g.strokeStyle = col; g.lineWidth = gap < 80 ? 1.5 + pulse : 1.5; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  txt('VAGUE DE FEU', x + w / 2, y + 8, 8, '#d8a890', 'center', 'VT323', w - 4);
+  txt(`${Math.max(0, Math.round(gap))} m`, x + w / 2, y + 18, 12, col, 'center', 'VT323', w - 6);
+  // jauge : 0 (rattrapé) → 300 m
+  const bx = x + 5, bw = w - 10, by = y + 22, k = Math.max(0, Math.min(1, gap / 300));
+  const gr = g.createLinearGradient(bx, 0, bx + bw, 0); gr.addColorStop(0, '#ff2a10'); gr.addColorStop(0.35, '#ff9a2a'); gr.addColorStop(1, '#3a2a20');
+  g.fillStyle = gr; g.fillRect(bx, by, bw, 4);
+  g.fillStyle = '#ffffff'; g.fillRect(bx + bw * k - 0.75, by - 1.5, 1.5, 7);
+  const tf = Math.round(tractionF() * 100);   // le poids de la rame
+  txt(`traction ${tf} %`, x + w / 2, y + 35, 9, tf > 80 ? '#9fe0ff' : tf > 60 ? '#ffd75e' : '#ff8a5b', 'center', 'VT323', w - 4);
+}
+// caméra arrière : le tunnel derrière la rame, et la vague qui grossit en approchant
+function drawRearCam() {
+  if (!S.fire || S.mode !== 'running' || S.over) return;
+  // affichée seulement pendant les 3 s qui suivent le départ (glisse depuis la gauche, puis repart)
+  const ta = S.t - (S.departT ?? -99), vis = ta < 0 || ta > 3.3 ? 0 : Math.min(1, ta / 0.25, (3.3 - ta) / 0.3);
+  if (vis <= 0) return;
+  g.save(); g.translate(-(1 - vis) * 84, 0);
+  drawRearCam0();
+  g.restore();
+}
+function drawRearCam0() {
+  const gap = fireGap(), x = 6, y = 6, w = 72, h = 44, cx = x + w / 2, cy = y + h / 2 + 3;
+  g.fillStyle = '#000'; g.fillRect(x - 1.5, y - 1.5, w + 3, h + 3);
+  g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+  g.fillStyle = '#07080a'; g.fillRect(x, y, w, h);
+  const atSt = S.phase !== 'drive';
+  // anneaux du tunnel qui défilent (ou quai éclairé quand on est à l'arrêt)
+  const off = (S.pos % 6) / 6;
+  for (let i = 7; i >= 0; i--) {
+    const k = (i + 1 - off) / 8, r = 6 + 70 * k * k;
+    const hot = Math.max(0, Math.min(1, 1 - gap / 260));   // les anneaux rougeoient quand la vague approche
+    g.strokeStyle = atSt ? `rgba(${200 + 55 * hot | 0},${190 - 90 * hot | 0},${160 - 130 * hot | 0},${0.08 + 0.18 * k + 0.2 * hot})` : `rgba(${140 + 115 * hot | 0},${140 - 60 * hot | 0},${150 - 120 * hot | 0},${0.05 + 0.2 * k + 0.2 * hot})`; g.lineWidth = 0.6 + k;
+    g.beginPath(); g.ellipse(cx, cy, r, r * 0.8, 0, Math.PI, 2 * Math.PI); g.stroke();
+  }
+  g.strokeStyle = 'rgba(160,160,170,0.35)'; g.lineWidth = 0.8;   // rails vers le point de fuite
+  for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(cx + sd * 1.5, cy); g.lineTo(cx + sd * 26, y + h); g.stroke(); }
+  // la vague : une lueur au loin, puis un mur de flammes qui roule dans le tunnel et remplit l'écran
+  if (gap < 520) {
+    const R = Math.min(95, 1100 / (Math.max(0, gap) + 10)), fl = 0.85 + 0.15 * Math.sin(S.t * 23) * Math.sin(S.t * 7.3);
+    // lumière projetée sur les parois du tunnel
+    const lg = g.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 3 + 20);
+    lg.addColorStop(0, `rgba(255,140,40,${0.55 * fl})`); lg.addColorStop(1, 'rgba(255,80,10,0)');
+    g.fillStyle = lg; g.fillRect(x, y, w, h);
+    // section du tunnel envahie : dégradé brûlant, boules de feu qui roulent, fumée au plafond
+    g.save(); g.beginPath(); g.ellipse(cx, cy + R * 0.25, R, R * 0.85, 0, Math.PI, 2 * Math.PI); g.lineTo(cx + R, cy + R * 0.6); g.lineTo(cx - R, cy + R * 0.6); g.closePath(); g.clip();
+    const fg = g.createLinearGradient(0, cy - R, 0, cy + R * 0.6);
+    fg.addColorStop(0, '#3a0c04'); fg.addColorStop(0.35, '#c8300a'); fg.addColorStop(0.7, '#ff9a2a'); fg.addColorStop(1, '#fff0b0');
+    g.fillStyle = fg; g.fillRect(cx - R, cy - R, 2 * R, 1.7 * R);
+    for (let i = 0; i < 14; i++) {   // boules de feu qui gonflent vers la caméra
+      const ph = (S.t * (0.7 + 0.5 * hsh(i, 2)) + hsh(i, 1)) % 1, a = hsh(i, 3) * Math.PI * 2;
+      const bx = cx + Math.cos(a) * R * 0.55 * ph, by = cy - R * 0.1 + Math.sin(a) * R * 0.4 * ph, br = R * (0.15 + 0.35 * ph);
+      const bg = g.createRadialGradient(bx, by, 0, bx, by, br);
+      bg.addColorStop(0, `rgba(255,${200 + Math.round(55 * hsh(i, 4))},120,${0.8 * (1 - ph)})`); bg.addColorStop(0.6, `rgba(255,110,20,${0.5 * (1 - ph)})`); bg.addColorStop(1, 'rgba(160,30,0,0)');
+      g.fillStyle = bg; g.fillRect(bx - br, by - br, 2 * br, 2 * br);
+    }
+    for (let i = 0; i < 6; i++) {    // fumée noire roulée au plafond
+      const ph = (S.t * 0.35 + i / 6) % 1, sx = cx + (hsh(i, 9) - 0.5) * R * 1.4, sy = cy - R * (0.55 + 0.3 * ph), sr = R * (0.25 + 0.25 * ph);
+      const sg = g.createRadialGradient(sx, sy, 0, sx, sy, sr);
+      sg.addColorStop(0, `rgba(20,12,10,${0.7 * (1 - ph * 0.5)})`); sg.addColorStop(1, 'rgba(20,12,10,0)');
+      g.fillStyle = sg; g.fillRect(sx - sr, sy - sr, 2 * sr, 2 * sr);
+    }
+    g.restore();
+    // le front de la vague : des langues de feu débordent tout autour de l'arche
+    for (let i = 0; i < 18; i++) {
+      const a0 = Math.PI * (1.02 + 0.96 * i / 17), q = 0.5 + 0.5 * Math.sin(S.t * (6 + hsh(i, 21) * 5) + i * 2.1);
+      const L = R * (0.18 + 0.32 * q * hsh(i, 22) + 0.1), ex = cx + Math.cos(a0) * R, ey = cy + R * 0.25 + Math.sin(a0) * R * 0.85;
+      const nx = Math.cos(a0), ny = Math.sin(a0), tx = -ny, ty = nx, wd = R * 0.12;
+      g.fillStyle = q > 0.55 ? 'rgba(255,190,70,0.8)' : 'rgba(255,100,24,0.75)';
+      g.beginPath(); g.moveTo(ex - tx * wd - nx * wd, ey - ty * wd - ny * wd);
+      g.quadraticCurveTo(ex + nx * L * 0.6 + tx * wd * Math.sin(S.t * 9 + i), ey + ny * L * 0.6 + ty * wd * Math.sin(S.t * 9 + i), ex + nx * L, ey + ny * L);
+      g.quadraticCurveTo(ex + nx * L * 0.4 - tx * wd, ey + ny * L * 0.4 - ty * wd, ex + tx * wd - nx * wd, ey + ty * wd - ny * wd); g.fill();
+    }
+    flameWall(cx - R * 1.3, cx + R * 1.3, cy + R * 0.62, R * 1.3, S.t, Math.max(0.3, R / 30));   // flammes qui lèchent le ballast
+    // braises projetées vers la caméra
+    const ne = Math.round(8 + 30 * Math.max(0, 1 - gap / 200));
+    for (let i = 0; i < ne; i++) {
+      const ph = (S.t * (0.9 + hsh(i, 5)) + hsh(i, 6)) % 1, a = hsh(i, 7) * Math.PI * 2, dd = (R * 0.3 + 60 * ph * ph);
+      g.fillStyle = ph < 0.5 ? `rgba(255,230,140,${1 - ph})` : `rgba(255,120,30,${1 - ph})`;
+      const sz = 0.6 + 1.6 * ph; g.fillRect(cx + Math.cos(a) * dd, cy + Math.sin(a) * dd * 0.7, sz, sz);
+    }
+    if (gap < 25) { g.fillStyle = `rgba(255,${Math.round(150 + 100 * fl)},80,${0.6 * (1 - gap / 25)})`; g.fillRect(x, y, w, h); }   // l'objectif fond
+  }
+  // grain vidéo
+  for (let i = 0; i < 30; i++) { g.fillStyle = `rgba(255,255,255,${0.04 + 0.06 * hsh(i, Math.floor(S.t * 30))})`; g.fillRect(x + hsh(i, Math.floor(S.t * 30) + 1) * w, y + hsh(i + 50, Math.floor(S.t * 30)) * h, 1, 1); }
+  g.restore();
+  g.strokeStyle = fireCol(gap); g.lineWidth = gap < 80 && Math.floor(S.t * 6) % 2 ? 2 : 1; g.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x, y, w, 9);
+  txt('CAM. ARRIÈRE', x + 3, y + 7, 7, '#c8ccd6');
+  if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#ff3a2a'; g.beginPath(); g.arc(x + w - 5, y + 4.5, 1.8, 0, 7); g.fill(); }
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x, y + h - 10, w, 10);
+  txt(`🔥 ${Math.max(0, Math.round(gap))} m${atSt ? ` · ${Math.max(0, Math.floor(fireEta()))} s` : ''}`, x + w / 2, y + h - 2.5, 9, fireCol(gap), 'center', 'VT323', w - 4);
+}
+// mur de flammes : couches de langues de feu qui ondulent (du rouge sombre au cœur blanc)
+const FLAME_LAYERS = [['rgba(160,26,4,0.8)', 1, 0.7], ['rgba(235,60,12,0.9)', 0.85, 1], ['rgba(255,120,26,0.9)', 0.64, 1.35], ['rgba(255,200,74,0.9)', 0.42, 1.8], ['rgba(255,246,200,0.85)', 0.2, 2.4]];
+function flameWall(x0, x1, base, hgt, t, sc = 1) {
+  FLAME_LAYERS.forEach(([col, kh, sp], L) => {
+    g.fillStyle = col; g.beginPath(); g.moveTo(x0, base);
+    const st = Math.max(1, (x1 - x0) / 90);
+    for (let xx = x0; xx <= x1 + st; xx += st) {
+      const u = xx / sc;
+      const tong = Math.pow(1 - Math.abs(Math.sin(u * 0.11 + t * 2.2 * sp + L * 1.7)), 1.6);
+      const mod = 0.55 + 0.25 * Math.sin(u * 0.037 - t * 1.3 * sp + L) + 0.2 * Math.sin(u * 0.19 + t * 4.1);
+      g.lineTo(xx, base - hgt * kh * (0.25 + 0.75 * tong * mod));
+    }
+    g.lineTo(x1, base); g.closePath(); g.fill();
+  });
+}
+// vue principale : lueur vacillante, fumée au plafond, braises poussées par le souffle qui nous dépassent
+function drawFireGlow() {
+  if (!S.fire || S.mode !== 'running' || S.fire.safe) return;
+  const gap = fireGap(); if (gap > 220) return;
+  const k = Math.min(1, Math.max(0, (220 - gap) / 200)), fl = 0.8 + 0.2 * Math.sin(S.t * 17) * Math.sin(S.t * 5.1);
+  // la lumière du brasier, derrière nous, éclaire le tunnel
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.fillStyle = `rgba(255,${Math.round(90 + 40 * fl)},20,${(0.04 + 0.16 * k) * fl})`; g.fillRect(0, 0, W, VIEW_H);
+  g.restore();
+  const vg = g.createRadialGradient(W / 2, VIEW_H / 2, VIEW_H * (0.75 - 0.35 * k), W / 2, VIEW_H / 2, W * 0.62);
+  vg.addColorStop(0, 'rgba(255,90,10,0)'); vg.addColorStop(1, `rgba(255,${Math.round(110 - 60 * k)},10,${(0.12 + 0.5 * k) * fl})`);
+  g.fillStyle = vg; g.fillRect(0, 0, W, VIEW_H);
+  // fumée qui envahit la voûte
+  if (gap < 150) {
+    const sk = Math.min(1, (150 - gap) / 130);
+    const sg = g.createLinearGradient(0, 0, 0, VIEW_H * 0.55);
+    sg.addColorStop(0, `rgba(24,14,10,${0.75 * sk})`); sg.addColorStop(1, 'rgba(24,14,10,0)');
+    g.fillStyle = sg; g.fillRect(0, 0, W, VIEW_H * 0.55);
+    for (let i = 0; i < 7; i++) {   // volutes qui roulent vers l'avant
+      const ph = (S.t * 0.25 + i / 7) % 1, sx = (i % 2 ? W - 30 : 30) + (i % 2 ? -1 : 1) * ph * (W / 2 - 30), sy = 6 + ph * (CY - 10) * 0.6, sr = 60 * (1 - ph) + 10;
+      const bg = g.createRadialGradient(sx, sy, 0, sx, sy, sr);
+      bg.addColorStop(0, `rgba(30,18,14,${0.45 * sk * (1 - ph)})`); bg.addColorStop(1, 'rgba(30,18,14,0)');
+      g.fillStyle = bg; g.fillRect(sx - sr, sy - sr, 2 * sr, 2 * sr);
+    }
+  }
+  // braises : elles naissent sur les bords et filent vers le fond du tunnel
+  const n = Math.round(10 + 70 * k);
+  for (let i = 0; i < n; i++) {
+    const per = 1.2 + 1.2 * hsh(i, 11), ph = (S.t / per + hsh(i, 12)) % 1, e = Math.pow(ph, 0.6);
+    const side = hsh(i, 13), x0 = side < 0.5 ? -10 + side * 120 : W + 10 - (side - 0.5) * 120, y0 = VIEW_H * (0.25 + 0.75 * hsh(i, 14));
+    const ex = x0 + (CX - x0) * e + Math.sin(S.t * 3 + i) * 3, ey = y0 + (CY - y0) * e - 10 * Math.sin(ph * Math.PI);
+    const sz = 2.4 * (1 - ph) + 0.5, a = (1 - ph) * (0.5 + 0.5 * hsh(i, 15));
+    const col = hsh(i, 16) > 0.6 ? `rgba(255,240,170,${a})` : hsh(i, 16) > 0.25 ? `rgba(255,150,40,${a})` : `rgba(230,60,20,${a})`;
+    // traînée : la braise file vers le fond, on dessine un trait dans le sens du mouvement
+    const dx = CX - x0, dy = CY - y0, dl = Math.hypot(dx, dy) || 1, tl = 3 + 7 * (1 - ph);
+    g.strokeStyle = col; g.lineWidth = Math.max(0.6, sz * 0.55); g.beginPath(); g.moveTo(ex - dx / dl * tl, ey - dy / dl * tl); g.lineTo(ex, ey); g.stroke();
+    if (sz > 1.4) { g.fillStyle = `rgba(255,200,90,${a * 0.25})`; g.fillRect(ex - sz, ey - sz, sz * 3, sz * 3); }
+  }
+  // tout près : les flammes surgissent en bas de l'écran
+  if (gap < 45) {
+    const kk = 1 - gap / 45;
+    flameWall(-10, W + 10, VIEW_H + 2, VIEW_H * 0.45 * kk, S.t, 2);
+    g.fillStyle = `rgba(255,120,20,${0.15 * kk * fl})`; g.fillRect(0, 0, W, VIEW_H);
+  }
+}
+// panneau à quai (à la place du trafic) : la vague, le temps restant, les voyageurs sauvés
+function drawFirePanel(x, y, w) {
+  const gap = fireGap(), h = 44, col = fireCol(gap);
+  g.fillStyle = 'rgba(10,6,4,0.88)'; g.fillRect(x, y, w, h);
+  g.strokeStyle = col; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  txt('VAGUE DE FEU', x + 5, y + 10, 10, '#d8a890');
+  txt(S.fire.safe ? 'ABRI FERMÉ' : `${Math.max(0, Math.round(gap))} m · ${Math.max(0, Math.floor(fireEta()))} s`, x + w - 5, y + 10, 11, S.fire.safe ? '#7dff8a' : col, 'right');
+  // frise de la ligne : vague, rame, terminus
+  const lx = x + 6, lw = w - 12, ly = y + 21, end = STATIONS[STATIONS.length - 1].pos, z0 = -FIRE_START;
+  const X = z => lx + lw * Math.max(0, Math.min(1, (z - z0) / (end - z0)));
+  g.fillStyle = '#3a3e48'; g.fillRect(lx, ly - 0.5, lw, 1);
+  STATIONS.forEach(st => { g.fillStyle = st.burnt ? '#ff5a2a' : '#8fa0b8'; g.fillRect(X(st.pos) - 0.5, ly - 2, 1, 4); });
+  const fx = X(S.fire.z), gr = g.createLinearGradient(lx, 0, fx + 1, 0); gr.addColorStop(0, 'rgba(120,20,0,0.6)'); gr.addColorStop(1, '#ffb030');
+  g.fillStyle = gr; g.fillRect(lx, ly - 2.5, Math.max(0, fx - lx), 5);
+  g.fillStyle = '#ffffff'; g.fillRect(X(S.pos - TRAIN_LEN), ly - 2, Math.max(2, X(S.pos) - X(S.pos - TRAIN_LEN)), 4);
+  const tf = Math.round(tractionF() * 100);
+  txt(`À bord ${S.load}`, x + 5, y + 38, 10, '#7dff8a');
+  txt(`⚙ ${tf} %`, x + w * 0.62, y + 38, 10, tf > 80 ? '#9fe0ff' : tf > 60 ? '#ffd75e' : '#ff8a5b', 'center');
+  txt(`† ${S.lost}`, x + w - 5, y + 38, 10, S.lost ? '#ff8a5b' : '#6f7a90', 'right');
+}
 function shiftSchedule(from, add) { for (let k = from; k < STATIONS.length; k++) { STATIONS[k].arr += add; STATIONS[k].dep += add; } }
 function startLeg() {
   S.trace = [];
@@ -1181,17 +1534,20 @@ function startLeg() {
   S.theft = null;
   const sus = S.suspects.find(x => !x.pending);
   if (sus) S.theft = { car: sus.car, at: S.clock + 2 + Math.random() * 4, shown: false };
-  S.inc = null; S.limit = 0; S.sigRed = 0; S.sigPos = null; S.alarm = null; S.overT = 0; S.sw = null; S.mg = null; S.rev = null;
+  S.inc = null; S.limit = 0; S.sigRed = 0; S.sigPos = null; S.alarm = null; S.overT = 0; S.sw = null; S.mg = null; S.rev = null; S.bends = []; S.btrace = []; S.bendTr = null;
   if (S.next >= STATIONS.length) return;
   S.person = null; S.dog = null; S.blackout = 0; S.malaise = null; S.cab = null;
   if (!S.dirtyKeep) S.dirtyCar = -1;
-  const n = STATIONS[S.next], cur = STATIONS[S.cur], L = LN(), r = Math.random() * 0.7 / L.inc;   // probabilité d'événement = L.inc
+  const n = STATIONS[S.next], cur = STATIONS[S.cur], L = LN();
+  let r = Math.random() * 0.7 / L.inc;   // probabilité d'événement = L.inc
+  // fin du monde : plus personne pour gérer travaux, alarmes, voyageurs égarés ou malaises. Restent les pannes et la foule
+  if (FIRE() && ((r >= 0.07 && r < 0.14) || (r >= 0.21 && r < 0.60) || (r >= 0.70 && r < 0.80))) r = Math.random() < 0.5 ? 0.15 : 0.65;
   const D = n.pos - cur.pos, last = S.next === STATIONS.length - 1;
   let text = '', add = 0, col = '#ffb35e';
-  if (r < 0.07) { S.inc = 'signal'; S.sigPos = cur.pos + 16; S.sigRed = 5 + Math.random() * 5; add = Math.ceil(S.sigRed) - 1; text = 'INCIDENT : signal rouge en sortie de station'; }
+  if (r < 0.07) { S.inc = 'signal'; S.sigPos = cur.pos + 16; S.sigRed = FIRE() ? 3 + Math.random() * 3 : 5 + Math.random() * 5; add = Math.ceil(S.sigRed) - 1; text = 'INCIDENT : signal rouge en sortie de station'; }
   else if (r < 0.14) { S.inc = 'limit'; S.limit = 30; S.limitT = S.limitT0 = 18; add = 8; text = 'INCIDENT : travaux, vitesse limitée à 30 km/h'; }
   else if (r < 0.21) {
-    S.inc = 'crowd'; n.crowd = true; text = `INCIDENT : quai bondé à ${n.name}`;
+    S.inc = 'crowd'; n.crowd = true; text = FIRE() ? `Foule de réfugiés à ${n.name} : préparez-vous à embarquer` : `INCIDENT : quai bondé à ${n.name}`;
     const cnt = 26 + Math.floor(Math.random() * 9);
     const target = Math.max(cnt, n.people.length + 12);
     for (let k = n.people.length; k < target; k++) n.people.push(mkPerson(n.pos - 68 + Math.random() * 70, 2.2 + Math.random() * 3.6));
@@ -1202,7 +1558,7 @@ function startLeg() {
     S.person = { pos: cur.pos + D * (0.4 + Math.random() * 0.25), x: 0.1, state: 'track', seen: false, hit: false, walk: 0,
       look: Object.assign(mkPerson(0, 0), { kind: 'adult', kid: null, acc: pick(['phone', 'backpack', null]), acc2: null, c: pick(['#ffcc00', '#ff6a00', '#e8e8e8']), dir: -1 }) };
   }
-  else if (r < 0.51) {           // 2. ordre du PCC : station fermée (traversée sans arrêt) ou régulation (arrêt prolongé)
+  else if (r < 0.51 && !FIRE()) {   // 2. ordre du PCC (pas pendant la fuite) : station fermée (traversée sans arrêt) ou régulation (arrêt prolongé)
     S.inc = 'pcc'; col = '#9fe0ff';
     // régulation : marquer l'arrêt 10 s de plus à la prochaine station
     n.dep += 10; shiftSchedule(S.next + 1, 10);
@@ -1222,11 +1578,12 @@ function startLeg() {
     S.dog = { pos: cur.pos + D * (0.3 + Math.random() * 0.2), x: (Math.random() - 0.5) * 0.6, state: 'sit', seen: false, hit: false,
       walk: 0, stT: 1.5, runT: 0, horns: 0, wag: 0, col: pick(['#8a5a2a', '#2a2420', '#c8a060', '#e8e0d0', '#6a6a6a']) };
   }
-  S.swCleared = false; planSwitch(cur, n, D, L);
+  S.swCleared = false; planSwitch(cur, n, D, L); if (S.sw) S.bends = []; else planBends(cur, n, D, L); addSwBends();   // un tunnel = des virages OU des aiguillages, jamais les deux
+  if (n.zombie) setTimeout(() => { if (S.mode === 'running' && STATIONS[S.next] === n) { msg(`☣ PCC : ${n.name} est infestée de zombies ! NE VOUS ARRÊTEZ PAS : traversez la station.`, '#9aff6a', 6); for (let i = 0; i < 3; i++) beep(520, 0.12, 'sawtooth', 0.05, i * 0.2); } }, 3500);
   if (S.swCleared) text = '';
   if (text) msg(text, col, 5);   // le temps perdu n'est pas rendu : il faudra le rattraper
   // incidents à bord (vus sur la caméra intérieure), tirés à part : ils s'ajoutent aux incidents de voie
-  if (!S.malaise && Math.random() < Math.min(0.65, 0.2 + 0.5 * L.inc)) {
+  if (!FIRE() && !S.malaise && Math.random() < Math.min(0.65, 0.2 + 0.5 * L.inc)) {
     const types = ['sick', 'fight', 'bag', 'slip', 'vendor'].filter(t => t !== 'sick' || S.dirtyCar < 0);
     S.cab = { type: pick(types), car: Math.floor(Math.random() * 5), at: S.clock + 3 + Math.random() * 6, shown: false, called: false, t: 0,
       look: mkPerson(0, 0), look2: mkPerson(0, 0), side: [mkPerson(0, 0), mkPerson(0, 0)], falls: 0, fallT: 0, hardT: 0 };
@@ -1337,13 +1694,13 @@ function drawIncidentBars() {
   if (dg && dg.seen && ['sit', 'trot', 'run'].includes(dg.state)) L.push(['CHIEN SUR LA VOIE · K', 1 - (dg.t || 0) / DOG_T, '#ffb35e']);
   if (pe && pe.seen && pe.state === 'track') L.push(['PERSONNE SUR LA VOIE · K', 1 - (pe.t || 0) / PERSON_T, '#ff4a3a']);
   const w = S.sw;
-  if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / SW_FIX, '#ffd75e'] : [`BIFURCATION · ${w.want === 'D' ? '← DIRECT' : '→ DÉVIÉ 30'}`, (w.pos - S.pos) / w.d0, w.tgt === w.want ? '#9fe0ff' : '#ff6b5b']);
+  if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / (w.fix || SW_FIX), '#ffd75e'] : [`${w.tot ? `AIGUILLE ${w.idx}/${w.tot}` : 'BIFURCATION'} · ${w.want === 'D' ? '← DIRECT' : FIRE() ? '→ DÉVIÉ' : '→ DÉVIÉ 30'}${w.plan && w.plan[w.idx] ? ` · puis ${w.plan[w.idx].want === 'D' ? '←' : '→'}` : ''}`, (w.pos - S.pos) / w.d0, w.tgt === w.want ? '#9fe0ff' : '#ff6b5b']);
   if (w && w.kind === 'merge' && w.eta !== null && swRed()) L.push(['TRAVERSÉE · cédez', (w.eta + 0.8 - S.clock) / (w.eta + 0.8 - w.start), '#ffd75e']);
-  if (w && w.kind === 'manual' && !w.done) L.push([S.mg ? 'MANŒUVRE EN COURS' : 'AIGUILLE EN PANNE · E', S.mg ? 1 - S.mg.hits / 3 : Math.max(0, (w.sig - S.pos) / w.d0), '#ff8a5b']);
+  if (w && w.kind === 'manual' && !w.done) L.push([S.mg ? 'COMMANDE DE SECOURS' : 'AIGUILLE EN PANNE · ARRÊTEZ-VOUS', S.mg ? 1 - S.mg.hits / DDR_NEED : Math.max(0, (w.sig - S.pos) / w.d0), '#ff8a5b']);
   const st = STATIONS[S.next], dz = st ? st.pos - S.pos : 99, top = dz <= 15 && dz >= -PE ? 80 : 6;   // sous le zoom d'arrêt s'il est affiché
   L.forEach(([lab, fr, col], i) => {
     const w = 112, h = 13, x = W - 6 - w, y = top + i * 15;
-    g.fillStyle = 'rgba(6,8,14,0.86)'; g.fillRect(x, y, w, h);
+    g.fillStyle = 'rgba(6,8,14,0.6)'; g.fillRect(x, y, w, h);
     g.fillStyle = col; g.fillRect(x, y, 2, h);
     txt(lab, x + 5, y + 8.5, 10, '#ffffff', 'left', 'VT323', w - 8);
     g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x + 4, y + h - 3, w - 6, 2);
@@ -1352,70 +1709,439 @@ function drawIncidentBars() {
 }
 // ---------- Aiguillages : bifurcation, voie déviée, convergence, manœuvre manuelle ----------
 const SW_LEN = 34, SW_SIG = 8, SW_DEV = 30, SW_FIX = 3, SW_LOCK = 20;   // longueur de la branche visible, signal 8 m avant l'aiguille
+const CH_GAP = 16, CH_FIX = 0.6, CH_LOCK = 10, CH_LEAD = 14, CH_STEP = 34 + 2 + 16 + 6;   // grill d'aiguillages : la suivante 16 m après la tête de tunnel, manœuvre éclair, verrou tardif
 const swOff = (w, z) => {                                 // décalage latéral (vers la droite) de la branche au point z
   const u = w.kind === 'merge' ? (w.pos - z) / SW_LEN : (z - w.pos) / SW_LEN;
-  return u < 0 || u > 1 ? null : 3.6 * Math.pow(u, 1.15);
+  return u < 0 || u > 1 ? null : w.kind === 'fork' ? BR * u * u * (3 - 2 * u) : 3.6 * Math.pow(u, 1.15);
 };
+// bifurcation : la branche s'écarte en S jusqu'à BR m, dans une salle qui s'élargit,
+// fermée par une tête de tunnel percée de deux tubes (voie directe et voie déviée)
+const BR = 5.2;
+const zBof = w => Math.ceil((w.pos + SW_LEN) / STEP) * STEP;                     // tête des deux tubes (sur la grille des tranches)
+const brOff = (w, z) => z <= w.pos ? 0 : z >= w.pos + SW_LEN ? BR : swOff(w, z);
+const chLead = w => w.lead || 34;   // la salle commence à s'élargir chLead m avant l'aiguille (plus court dans un grill)
+function chamberE(w, z) { const L = chLead(w), u = Math.max(0, Math.min(1, (z - (w.pos - L)) / (L - 4))); return BR * u * u * (3 - 2 * u); }
+function chamberProf(e) {
+  if (e <= 0.001) return T_PROF;
+  const cxv = e / 2, A = 2.3 + e / 2, H = 1.7 + 0.25 * e, p = [[-2.3, -2], [-2.3, -0.9], [-2.3, 0.4]];
+  for (let i = 1; i < 10; i++) { const a = Math.PI - i * Math.PI / 10; p.push([cxv + A * Math.cos(a), 0.4 + H * Math.sin(a)]); }
+  p.push([2.3 + e, 0.4], [2.3 + e, -0.9], [2.3 + e, -2]);
+  return p;
+}
+// vue : a = décalage de la salle (et de tout ce qui est avant la tête), b = au-delà, dans le tube emprunté
+// grill : l'aiguille suivante existe déjà au bout du tube (même géométrie), pour un tunnel continu
+function swGhost() {
+  const w = S.sw; if (!w || !w.tot || !w.plan || !w.plan[w.idx] || S.mode !== 'running') return null;
+  const e = w.plan[w.idx];
+  if (!e.g) e.g = { kind: 'fork', pos: e.pos, sig: e.pos - SW_SIG, want: e.want, set: e.set0, fixT: 0, lead: CH_LEAD, passed: false, ghost: true };
+  e.g.set = S.swQueue || e.set0;
+  return e.g;
+}
+function swView() {
+  const w = S.sw; if (!w || w.kind !== 'fork' || S.mode !== 'running') return null;
+  const zB = zBof(w), onBr = w.passed && w.set === 'G' && S.pos > w.pos, setG = w.set === 'G';
+  const camX = onBr ? brOff(w, S.pos) : 0;
+  // au-delà de la tête, le monde est aligné sur le tube choisi (pas de saut quand on franchit l'aiguille)
+  return { zB, onBr, setG, a: -camX, b: (setG ? BR : 0) - camX };
+}
+function chamberSlice(w, p0, d0, d1) {
+  const yf = -2, full = p0 - S.pos >= NEAR, { f, w: wm } = tunnelLight(p0 + 1, d0);
+  const e0 = chamberE(w, p0), e1 = chamberE(w, p0 + STEP), A = chamberProf(e0), B = chamberProf(e1);
+  for (let i = 0; i < A.length - 1; i++) {
+    const n = 0.93 + 0.1 * hsh(p0, i);
+    poly([[A[i][0], A[i][1], d0], [A[i + 1][0], A[i + 1][1], d0], [B[i + 1][0], B[i + 1][1], d1], [B[i][0], B[i][1], d1]], tl(C.tWall, f * T_SHADE[i] * n, wm * T_SHADE[i]));
+  }
+  if (full) for (let i = 0; i < A.length - 1; i++) poly([[A[i][0], A[i][1], d0], [A[i + 1][0], A[i + 1][1], d0], [A[i + 1][0], A[i + 1][1], d0 + 0.06], [A[i][0], A[i][1], d0 + 0.06]], tl(C.tWall, f * T_SHADE[i] * 0.62, wm * 0.5));
+  poly([[-2.3, yf, d1], [2.3 + e1, yf, d1], [2.3 + e0, yf, d0], [-2.3, yf, d0]], tl(C.ballast, f * 0.92, wm * 0.6));
+  poly([[-0.12, yf + 0.002, d1], [0.12, yf + 0.002, d1], [0.12, yf + 0.002, d0], [-0.12, yf + 0.002, d0]], tl([22, 22, 26], f, 0));
+  if (d0 < 34) poly([[-1.4, yf + 0.25, d1], [1.4, yf + 0.25, d1], [1.4, yf + 0.25, d0], [-1.4, yf + 0.25, d0]], `rgba(255,236,190,${(0.12 * (1 - d0 / 34)).toFixed(3)})`);
+  brakeZone(p0, d0, f, yf);
+  track(p0, d0, d1, f, yf);
+  poly([[-2.3, -1.75, d1], [-1.7, -1.75, d1], [-1.7, -1.75, d0], [-2.3, -1.75, d0]], tl([74, 70, 74], f, wm));
+  face([-1.7, -1.75], [-1.7, yf], d0, d1, tl([48, 46, 50], f, wm * 0.5));
+  if (full && ((p0 % 8) + 8) % 8 === 0 && e0 > 1) {   // plafonniers de la salle
+    const yc = 0.4 + 1.7 + 0.25 * e0 - 0.08, [lx, ly] = P(e0 / 2, yc, d0 + 1);
+    poly([[e0 / 2 - 0.4, yc, d0 + 1.2], [e0 / 2 + 0.4, yc, d0 + 1.2], [e0 / 2 + 0.4, yc, d0 + 0.8], [e0 / 2 - 0.4, yc, d0 + 0.8]], '#ffe6b0');
+    glow(lx, ly, Math.min(70, 2.6 * F / (d0 + 1)), '255,205,120', 0.32);
+  }
+}
+// barrière de fin de voie : butoir rayé rouge et blanc, croix de Saint-André et feux rouges clignotants
+function drawBarrier(x, d) {
+  if (d < NEAR + 0.3) return;
+  const yf = -2, f = Math.max(0.55, 1 - d / 140), on = Math.floor(S.t * 3) % 2 === 0;
+  for (const sd of [-1, 1]) poly([[x + sd * 1.15 - 0.07, yf, d], [x + sd * 1.15 + 0.07, yf, d], [x + sd * 1.15 + 0.07, yf + 1.15, d], [x + sd * 1.15 - 0.07, yf + 1.15, d]], sh([190, 192, 198], f));
+  for (let k = 0; k < 8; k++) {
+    const xa = x - 1.35 + k * 0.3375, xb = xa + 0.3375;
+    poly([[xa, yf + 0.68, d], [xb, yf + 0.68, d], [xb, yf + 1.02, d], [xa, yf + 1.02, d]], k % 2 ? sh([245, 245, 245], f) : sh([214, 32, 28], f));
+  }
+  // panneau : croix rouge sur fond blanc
+  poly([[x - 0.45, yf + 1.25, d], [x + 0.45, yf + 1.25, d], [x + 0.45, yf + 2.05, d], [x - 0.45, yf + 2.05, d]], sh([240, 240, 240], f));
+  poly([[x - 0.06, yf + 1.15, d], [x + 0.06, yf + 1.15, d], [x + 0.06, yf + 1.25, d], [x - 0.06, yf + 1.25, d]], sh([150, 150, 156], f));
+  const bar = (s1) => poly([[x - 0.36, yf + 1.33 + (s1 ? 0 : 0.64), d], [x - 0.24, yf + 1.33 + (s1 ? 0 : 0.64), d], [x + 0.36, yf + 1.97 - (s1 ? 0 : 0.64), d], [x + 0.24, yf + 1.97 - (s1 ? 0 : 0.64), d]], sh([214, 32, 28], f));
+  bar(true); bar(false);
+  for (const sd of [-1, 1]) {
+    const lit = on === (sd < 0), [lx, ly] = P(x + sd * 1.15, yf + 1.22, d), r = Math.max(0.8, 0.09 * F / d);
+    g.fillStyle = lit ? '#ff3a22' : '#4a0f0a'; g.beginPath(); g.arc(lx, ly, r, 0, 7); g.fill();
+    if (lit) glow(lx, ly, Math.min(50, 1.8 * F / d), '255,40,20', 0.7);
+  }
+  if (d < 45) { const [tx, ty] = P(x, yf + 0.45, d); txt('FIN DE VOIE', tx, ty, Math.max(6, Math.min(14, Math.round(0.42 * F / d))), '#ffd0c8', 'center'); }
+}
+// tête de la salle : mur percé des deux tubes ; le tube non emprunté reste noir
+function drawHeadwall(w, d, SV = swView()) {
+  if (!SV) return;
+  const f = Math.max(0.12, tunnelLight(SV.zB, d).f);
+  const out = chamberProf(BR), main = T_PROF, br = T_PROF.map(([x, y]) => [x + BR, y]);
+  const path = pts => pts.forEach(([x, y], i) => { const [sx, sy] = P(x, y, d); i ? g.lineTo(sx, sy) : g.moveTo(sx, sy); });
+  g.beginPath(); path(out); g.closePath(); path(main); g.closePath(); path(br); g.closePath();
+  g.fillStyle = tl(C.tWall, f * 0.95, 0); g.fill('evenodd');
+  const hole = SV.setG ? main : br;
+  g.beginPath(); path(hole); g.closePath(); g.fillStyle = '#030305'; g.fill();
+  for (const h of [main, br]) { g.beginPath(); path(h); g.strokeStyle = tl(C.tWall, Math.min(1, f * 1.35), 0); g.lineWidth = Math.max(0.6, 0.12 * F / d); g.stroke(); }
+  // plaques lumineuses au-dessus des deux tubes : flèche verte sur la voie demandée, croix rouge sur l'autre
+  for (const [x, k, lab] of [[0, 'D', 'DIRECT'], [BR, 'G', 'DÉVIÉ']]) {
+    const good = w.want === k, y0 = 2.18, y1 = 2.9;
+    poly([[x - 0.9, y0, d], [x + 0.9, y0, d], [x + 0.9, y1, d], [x - 0.9, y1, d]], '#0a0c10');
+    poly([[x - 0.82, y0 + 0.07, d], [x + 0.82, y0 + 0.07, d], [x + 0.82, y1 - 0.07, d], [x - 0.82, y1 - 0.07, d]], good ? '#0f4a22' : '#4a1210');
+    const c = good ? '#7dff8a' : '#ff4a3a', cyy = (y0 + y1) / 2;
+    if (good) {   // flèche (droite pour DIRECT, oblique pour DÉVIÉ)
+      const t = k === 'D' ? 0 : 0.6, q = (u, v) => [x + u * Math.cos(t) + v * Math.sin(t), cyy + v * Math.cos(t) - u * Math.sin(t), d];
+      poly([q(-0.07, -0.26), q(0.07, -0.26), q(0.07, 0.08), q(-0.07, 0.08)], c);
+      poly([q(-0.2, 0.06), q(0.2, 0.06), q(0, 0.3)], c);
+    } else for (const sg of [1, -1]) poly([[x - 0.25, cyy - sg * 0.25, d], [x - 0.15, cyy - sg * 0.25, d], [x + 0.25, cyy + sg * 0.25, d], [x + 0.15, cyy + sg * 0.25, d]], c);
+    const [gx, gy] = P(x, cyy, d); glow(gx, gy, Math.min(50, 1.2 * F / d), good ? '90,255,130' : '255,60,40', 0.35);
+    const sz = Math.round(0.3 * F / d);
+    if (sz >= 6) { const [tx, ty] = P(x, y0 - 0.12, d); txt(lab, tx, ty + sz * 0.7, Math.min(16, sz), c, 'center'); }
+  }
+  // barrière dans le tube non emprunté (sinon elle est dessinée dans le tube emprunté, plus loin)
+  const notWant = w.want === 'D' ? 'br' : 'main', nonTaken = SV.setG ? 'main' : 'br';
+  if (notWant === nonTaken) drawBarrier(notWant === 'br' ? BR : 0, d + 6);
+}
 // traversée : une voie oblique coupe la nôtre au point w.pos, de la gauche (près) vers la droite (loin)
 const XU = 8 / Math.hypot(8, 12), XZ = 12 / Math.hypot(8, 12), X_LEN = 30, X_V = 11, X_SC = 4 / XU;   // X_SC : abscisse du croisement
 const xPt = (w, s) => [-4 + XU * s, w.pos - 6 + XZ * s];
 const X_IN = (4 - 2.29) / XU, X_OUT = (4 + 2.29) / XU;               // entrée / sortie entre les piédroits
 const X_CLEAR = X_SC + 2.7 / XU + X_LEN;                              // la queue a dégagé notre voie
-function dirName(k) { return k === 'D' ? `la voie DIRECTE (direction ${STATIONS[STATIONS.length - 1].name})` : 'la voie DÉVIÉE (30 km/h)'; }
+function dirName(k) { return k === 'D' ? `la voie DIRECTE (direction ${STATIONS[STATIONS.length - 1].name})` : FIRE() ? 'la voie DÉVIÉE' : 'la voie DÉVIÉE (30 km/h)'; }
 // sélecteur de direction en cabine : le conducteur commande l'aiguille avant de l'atteindre
 function chooseDir(k) {
   const w = S.sw;
+  // grill : aiguille courante verrouillée ou dépassée, on présélectionne la suivante
+  if (w && w.tot && w.chain > 0 && S.phase === 'drive' && !S.rev && (w.passed || w.pos - S.pos < (w.lock || SW_LOCK))) {
+    if (S.swQueue !== k) { S.swQueue = k; w.plan[w.idx].set0 = k;   // l'aiguille suivante (déjà visible au bout du tube) bascule tout de suite
+      beep(760, 0.05, 'square', 0.04); msg(`Aiguille ${w.idx + 1} présélectionnée : ${k === 'D' ? '← DIRECT' : '→ DÉVIÉ'}`, '#9fe0ff', 1.5); }
+    return true;
+  }
   if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return false;
-  if (w.pos - S.pos < SW_LOCK) { msg('Aiguille verrouillée : la rame est trop près', '#ff6b5b', 2); beep(220, 0.15, 'square', 0.04); return true; }
+  if (w.pos - S.pos < (w.lock || SW_LOCK)) { msg('Aiguille verrouillée : la rame est trop près', '#ff6b5b', 2); beep(220, 0.15, 'square', 0.04); return true; }
   if (k === w.tgt) { beep(990, 0.05, 'sine', 0.04); return true; }
-  w.tgt = k; w.fixT = SW_FIX; w.chose = true;
+  w.tgt = k; w.fixT = w.fix || SW_FIX; w.chose = true; S.vacAlert = 0; S.vacT = Math.max(S.vacT, 20);
   beep(700, 0.06, 'square', 0.04); noise(0.4, 0.1, 'bandpass', 500, 2);
-  msg(`Itinéraire commandé : ${k === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Aiguille en mouvement, signal fermé`, '#ffd75e', 2.5);
+  if (!w.tot) msg(`Itinéraire commandé : ${k === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Aiguille en mouvement, signal fermé`, '#ffd75e', 2.5);
   return true;
 }
 function swRed() {
   const w = S.sw; if (!w) return false;
   if (w.kind === 'manual') return !w.done;
-  if (w.kind === 'fork') return w.fixT > 0;
+  if (w.kind === 'fork') return w.fixT > 0 || !w.set;   // pas encore de direction choisie : signal fermé
   return w.eta !== null && S.clock < w.eta + 0.8;
 }
 function planSwitch(cur, n, D, L) {
-  S.sw = null; S.mg = null; S.rev = null;
+  S.sw = null; S.mg = null; S.rev = null; S.swQueue = null;
   // incompatibles : travaux, signal rouge, personne ou chien sur la voie (même portion de tunnel)
   const seen = S.swSeen || (S.swSeen = []);
   const force = !seen.length && D >= 260;                          // le premier trajet assez long a toujours son aiguillage
-  if (force && ['limit', 'signal', 'person', 'dog'].includes(S.inc)) {   // il remplace l'incident de voie incompatible
+  const grill = FIRE() && n.grill && D >= 400;
+  if ((force || grill) && ['limit', 'signal', 'person', 'dog'].includes(S.inc)) {   // il remplace l'incident de voie incompatible
     S.inc = null; S.limit = 0; S.sigPos = null; S.sigRed = 0; S.person = null; S.dog = null; S.swCleared = true;
   }
   if (['limit', 'signal', 'person', 'dog'].includes(S.inc) || D < 260) return;
-  if (!force && Math.random() > 0.3 + 0.35 * L.inc) return;
-  const fresh = ['fork', 'merge', 'manual'].filter(k => !seen.includes(k));   // on fait découvrir chaque type
-  const kind = fresh.length ? pick(fresh) : wpick({ fork: 0.45, merge: 0.35, manual: 0.2 });
+  if (!force && !grill && Math.random() > 0.3 + 0.35 * L.inc) return;
+  const types = FIRE() ? ['fork', 'merge'] : ['fork', 'merge', 'manual'];   // fuite : pas de manœuvre à pied avec le feu derrière
+  const fresh = types.filter(k => !seen.includes(k));   // on fait découvrir chaque type
+  let kind = fresh.length ? pick(fresh) : FIRE() ? wpick({ fork: 0.75, merge: 0.25 }) : wpick({ fork: 0.45, merge: 0.35, manual: 0.2 });
+  // fuite : grill d'aiguillages, une série d'aiguilles très rapprochées à choisir à la volée
+  const ch0 = cur.res.skipped || cur.closed ? 160 : 70;   // station traversée lancée : de quoi freiner avant la 1re aiguille
+  const chainRoom = n.pos - CURVE_D - 30 - (cur.pos + PE + ch0);
+  const chain = grill ? Math.max(5, Math.min(7, 1 + Math.floor((chainRoom - SW_LEN) / CH_STEP))) : 0;   // au moins 5 aiguilles d'affilée
+  if (chain >= 3) { kind = 'fork'; S.chainSeen = true; }
   seen.push(kind);
-  const pos = cur.pos + PE + 60 + Math.random() * (D - PL - PE - 140);
+  const pos = chain >= 3 ? cur.pos + PE + ch0 + Math.random() * 15 : cur.pos + PE + 60 + Math.random() * (D - PL - PE - 140);
+  S.swEnd = chain >= 3 ? pos + (chain - 1) * CH_STEP + SW_LEN : pos;   // les virages se tiennent à l'écart de toute la série
   S.swN = (S.swN || 0) + 1;
   const w = S.sw = { kind, pos, sig: pos - SW_SIG, d0: pos - cur.pos, want: 'D', set: 'D', fixT: 0, called: false, passed: false, sigPassed: false, eta: null, start: 0, stopped: false, done: false, limOn: false };
+  if (chain >= 3) {
+    // la série est tirée d'avance : positions et directions, pour que le profil de vitesse montre les passages en voie déviée
+    const plan = []; let pz = pos;
+    for (let k = 0; k < chain; k++) { plan.push({ pos: pz, want: Math.random() < 0.5 ? 'G' : 'D', set0: null }); pz = zBof({ pos: pz }) + 2 + CH_GAP + Math.random() * 6; }
+    Object.assign(w, { chain: chain - 1, idx: 1, tot: chain, fix: CH_FIX, lock: CH_LOCK, lead: CH_LEAD, want: plan[0].want, plan });
+    w.set = w.tgt = plan[0].set0; w.wrong0 = w.set !== w.want; w.chg = false;
+    setTimeout(() => { if (S.sw && S.sw.tot && S.mode === 'running') msg(`📻 PCC : GRILL D'AIGUILLAGES ! ${chain} aiguilles en série. Suivez les flèches : ← direct, → dévié`, '#ffb35e', 5); for (let i = 0; i < 3; i++) beep(1250, 0.08, 'square', 0.05, i * 0.15); }, 1500);
+    return;
+  }
   const dist = Math.round((pos - cur.pos) / 10) * 10;
   if (kind === 'fork') {
     w.want = Math.random() < 0.45 ? 'G' : 'D';
-    w.set = Math.random() < 0.5 ? 'G' : 'D'; w.tgt = w.set; w.wrong0 = w.set !== w.want; w.chg = Math.random() < 0.3 && w.d0 > 230;
+    w.set = null; w.tgt = null; w.wrong0 = true;   // aucune direction tracée : au conducteur de choisir ← ou →
+    w.chg = Math.random() < 0.3 && w.d0 > 230;
     setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : bifurcation à ${dist} m, prenez ${dirName(w.want)}. Choisissez la direction : ← direct, → dévié.`, '#9fe0ff', 6); }, 1500);
   } else if (kind === 'manual') {
-    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : aiguille en panne à ${dist} m. Arrêtez-vous au signal, puis E pour la manœuvrer à la main.`, '#ffb35e', 6); }, 1500);
+    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : aiguille en panne à ${dist} m. Arrêtez-vous au signal : commande de secours, flèches en rythme.`, '#ffb35e', 6); }, 1500);
+  }
+}
+// ---- virages : série de courbes limitées en vitesse, chacune avec sa propre courbe de freinage ----
+const BEND_RAMP = 8, BEND_TOL = 9;   // raccordement progressif sur 8 m ; déraillement quand on dépasse le profil de 9 km/h
+// vitesse permise avant et dans les virages (la descente de freinage, puis la limite) : 999 hors contrainte
+function derailEnv(z) {
+  let v = 999;
+  for (const b of S.bends || []) {
+    if (z > b.pos + b.len || b.pos - z > 220) continue;
+    if (FIRE() && z < b.pos) continue;   // fuite : en ligne droite, aucune limite ; seul le virage lui-même se négocie
+    v = Math.min(v, z < b.pos ? bendTarget(b, b.pos - z) : b.lim);
+  }
+  return v;
+}
+const bendTarget = (b, d) => d <= 0 ? b.lim : Math.sqrt((b.lim / 3.6) ** 2 + 2 * BRAKE_REF * d) * 3.6;
+// grill d'aiguillages : chaque passage en voie déviée entre dans le profil de vitesse comme un « virage » à 30 km/h
+function addSwBends() {
+  const w = S.sw; if (!w || !w.plan || FIRE()) return;   // fuite : aiguillages sans limite de vitesse, pas de profil
+  w.plan.forEach((e, k) => { if (e.want === 'G') S.bends.push({ pos: e.pos - 3, len: SW_DEV + 8, lim: 30, dir: 0, R: 1e9, sw: true, swIdx: k + 1, swTot: w.plan.length, tol: 20, entered: false, done: false }); });
+  S.bends.sort((p, q) => p.pos - q.pos);
+}
+function planBends(cur, n, D, L) {
+  S.bends = [];
+  // portion libre : après la sortie de station, avant l'approche de la suivante, loin des aiguillages
+  // station traversée sans arrêt : la rame arrive lancée, on laisse la place de freiner avant le premier virage
+  let a = cur.pos + PE + (cur.res.skipped || cur.closed ? 140 : 25), b = n.pos - CURVE_D - 5;
+  const ivs = [];
+  if (S.sw) { const lo = S.sw.pos - (FIRE() ? 95 : 140), hi = S.swEnd + (FIRE() ? 40 : 55); if (lo > a) ivs.push([a, Math.min(b, lo)]); if (hi < b) ivs.push([Math.max(a, hi), b]); }
+  else ivs.push([a, b]);
+  const free = ivs.filter(v => v[1] - v[0] >= 20);
+  if (!free.length) return;
+  if (S.bendSeen && !FIRE() && Math.random() < 0.1) return;   // presque chaque interstation a sa série de virages (fuite : toutes)
+  const LIMS = FIRE() ? [25, 30, 35, 40] : [15, 20, 25, 30, 35, 40];   // des virages très serrés (fuite : jamais plus lents que la vague)
+  let lost = 0;
+  free.forEach(iv => {
+    // on remplit la portion libre : une série de 2 à 6 virages en S, parfois en épingle (même sens)
+    const room = iv[1] - iv[0], want = 3 + Math.floor(Math.random() * 5), series = []; let len = 0;
+    for (let i = 0; i < want; i++) {
+      const l = 12 + Math.random() * 14, gap = i ? 7 + Math.random() * 12 : 0;
+      if (len + l + gap > room) break;
+      series.push({ l, gap }); len += l + gap;
+    }
+    if (!series.length) return;
+    let z = iv[0] + Math.random() * Math.min(15, room - len), dir = Math.random() < 0.5 ? -1 : 1;
+    series.forEach(sr => {
+      z += sr.gap;
+      const lim = LIMS[Math.floor(Math.random() * LIMS.length)], v = lim / 3.6;
+      S.bends.push({ pos: z, len: sr.l, lim, dir, R: Math.max(20, v * v / 1.5), entered: false, done: false });
+      // temps rendu à l'horaire : freinage, passage à vitesse réduite et réaccélération
+      const vr = REF_VMAX;
+      if (v < vr) lost += sr.l * (1 / v - 1 / vr) + (vr - v) ** 2 / (2 * vr) * (1 / BRAKE_REF + 1 / 2);
+      z += sr.l; if (Math.random() < 0.75) dir = -dir;
+    });
+  });
+  S.bends.sort((p, q) => p.pos - q.pos);
+  const add = Math.ceil(lost);
+  n.arr += add; n.dep += add; shiftSchedule(S.next + 1, add);
+  if (!S.bendSeen) {
+    S.bendSeen = true;
+    setTimeout(() => { if (S.bends.length && S.mode === 'running') msg(`📻 PCC : ${S.bends.length > 1 ? 'virages' : 'virage'} en approche. Restez sous la courbe, sinon déraillement !`, '#9fe0ff', 5); }, 2500);
+  }
+}
+// courbure de la voie à l'abscisse z (signe = côté)
+const curveList = () => S.bends;
+function bendK(z) {
+  const bs = curveList(); if (!bs || !bs.length) return 0;
+  for (const b of bs) if (z > b.pos && z < b.pos + b.len) {
+    const u = Math.min(1, (z - b.pos) / BEND_RAMP, (b.pos + b.len - z) / BEND_RAMP);
+    return b.dir / b.R * u * u * (3 - 2 * u);
+  }
+  return 0;
+}
+// décalage latéral de la voie vue depuis la cabine (la rame est toujours dans l'axe de la voie)
+const CURV = new Float32Array(178); let CURV_ON = false;
+function buildCurv() {
+  CURV_ON = S.mode === 'running' && curveList() && curveList().some(b => b.pos + b.len > S.pos && b.pos < S.pos + DMAX);
+  if (!CURV_ON) return;
+  let h = 0, x = 0;
+  for (let i = 0; i < CURV.length; i++) { CURV[i] = x; h += bendK(S.pos + i + 0.5); x += h; }
+}
+function curvAt(d) {
+  if (!CURV_ON || d <= 0) return 0;
+  const i = Math.min(CURV.length - 2, d | 0), f = Math.min(1, d - i);
+  return CURV[i] + (CURV[i + 1] - CURV[i]) * f;
+}
+// profil de vitesse permise le long de la voie : descente avant chaque virage, plateau dans le virage, remontée après
+const BEND_ACC = 1.6;   // remontée après le virage (m/s², à peu près la traction de la rame à ces vitesses)
+function bendEnv(z) {
+  let v = 80;
+  for (const b of S.bends || []) {
+    const end = b.pos + b.len;
+    const t = z < b.pos ? bendTarget(b, b.pos - z) : z <= end ? b.lim : Math.sqrt((b.lim / 3.6) ** 2 + 2 * BEND_ACC * (z - end)) * 3.6;
+    v = Math.min(v, t);
+  }
+  return v;
+}
+const BP_BACK = 25, BP_AHEAD = 125;   // fenêtre du profil : 25 m derrière, 125 m devant
+const bendProfileOn = () => S.mode === 'running' && S.phase === 'drive' && (S.bends || []).some(b => b.pos - S.pos <= BP_AHEAD && S.pos <= b.pos + b.len + 20);
+// virage le plus contraignant pour la vitesse actuelle (celui dont la courbe impose la vitesse la plus basse)
+function activeBend() {
+  if (S.mode !== 'running' || S.phase !== 'drive' || !S.bends) return null;
+  let best = null, bv = 1e9;
+  for (const b of S.bends) {
+    const d = b.pos - S.pos;
+    if (b.done || d > CURVE_D || S.pos > b.pos + b.len) continue;
+    const t = bendTarget(b, d);
+    if (t < bv) { bv = t; best = b; }
+  }
+  return best;
+}
+const bendHere = () => S.bends && S.bends.find(b => S.pos >= b.pos && S.pos <= b.pos + b.len);
+function updateBends(dt) {
+  if (S.phase !== 'drive' || S.over || !S.bends || !S.bends.length) return;
+  const kmh = S.v * 3.6;
+  for (const b of S.bends) {
+    if (!b.entered && S.pos >= b.pos) {
+      b.entered = true;
+      if (kmh <= b.lim + 1 && kmh >= b.lim - 10) { S.score += 20; msg(`${b.sw ? 'Voie déviée' : 'Virage'} pris${b.sw ? 'e' : ''} en zone verte (+20)`, '#7dff8a', 2); }
+    }
+    if (b.entered && !b.done && S.pos > b.pos + b.len) b.done = true;
+  }
+  // on sort de la zone verte (au-dessus du profil + 4 km/h, à l'approche comme dans le virage) : déraillement
+  const env = derailEnv(S.pos);
+  if (env < 900 && kmh > env + BEND_TOL) {
+    S.derT = (S.derT || 0) + dt;
+    if (S.derT > 0.5) {   // tolérance : un écart bref se rattrape
+      const bb = S.bends.find(x => S.pos <= x.pos + x.len && x.pos - S.pos < 220) || {};
+      gameOver('Déraillement', `Sorti de la zone verte à ${Math.round(kmh)} km/h (profil ${Math.round(env)} km/h${bb.lim ? `, ${bb.sw ? 'voie déviée' : 'virage'} à ${bb.lim}` : ''}).`); return;
+    }
+  } else S.derT = 0;
+  if (env < 900 && kmh > env + 0.5) {   // au-dessus du profil : alerte, il faut freiner tout de suite
+    S.squealT = (S.squealT || 0) - dt;
+    if (S.squealT <= 0) { S.squealT = 0.2; beep(2600 + Math.random() * 500, 0.15, 'sawtooth', 0.03); }
+  }
+  const b = bendHere();
+  if (!b) { S.bendOverT = 0; return; }
+  if (kmh > b.lim + 1) {   // crissement  if (kmh > b.lim + 1) {   // crissement des roues et pénalité tant qu'on reste au-dessus
+    S.bendOverT = (S.bendOverT || 0) + dt;
+    S.squealT = (S.squealT || 0) - dt;
+    if (S.squealT <= 0) { S.squealT = 0.25; beep(2600 + Math.random() * 500, 0.22, 'sawtooth', 0.025); }
+    if (S.bendOverT >= 1) { S.bendOverT = 0; pen(-10, `Survitesse dans le virage (limite ${b.lim})`); }
+  } else S.bendOverT = 0;
+  // léger chant des roues dans la courbe, même à bonne vitesse
+  if (S.v > 6) { S.wheelT = (S.wheelT || 0) - dt; if (S.wheelT <= 0) { S.wheelT = 0.6 + Math.random() * 0.8; noise(0.3, 0.025 + S.v / 900, 'bandpass', 3200, 6); } }
+}
+// trace vitesse / distance du virage suivi par la courbe
+function traceBend() {
+  if (!bendProfileOn()) return;
+  const last = S.btrace[S.btrace.length - 1];
+  if (!last || S.pos - last[0] >= 0.5) S.btrace.push([S.pos, S.v * 3.6]);
+  while (S.btrace.length && S.btrace[0][0] < S.pos - BP_BACK - 2) S.btrace.shift();
+}
+// graphique « montagnes » : la vitesse permise sur les 150 m autour de la rame, zone verte juste en dessous
+function drawBendProfile(x, y, w, h) {
+  const L = 13, B = 7, gx = x + L, gw = w - L - 3, gy = y + 2, gh = h - B - 2, z0 = S.pos - BP_BACK, span = BP_BACK + BP_AHEAD, VM = 80;
+  const X = z => gx + gw * (z - z0) / span, Y = v => gy + gh - gh * Math.max(0, Math.min(VM, v)) / VM;
+  g.fillStyle = 'rgba(8,10,14,0.9)'; g.fillRect(x, y, w, h);
+  for (const v of [20, 40, 60, 80]) { g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(gx, Y(v), gw, 0.5); if (v < 80) txt(String(v), x + L - 2, Y(v) + 2.5, 7, '#7f8aa0', 'right'); }
+  // virages : bandes sombres et vitesse limite en bas
+  for (const b of S.bends) {
+    const a = Math.max(z0, b.pos), e = Math.min(z0 + span, b.pos + b.len); if (e <= a) continue;
+    g.fillStyle = 'rgba(255,215,94,0.08)'; g.fillRect(X(a), gy, X(e) - X(a), gh);
+    txt(String(b.lim), (X(a) + X(e)) / 2, y + h - 1, 7, '#ffd75e', 'center');
+  }
+  const pts = []; for (let z = z0; z <= z0 + span + 0.01; z += 1) pts.push([z, bendEnv(z)]);
+  // trop vite (rouge) au-dessus du profil, zone verte dessous
+  g.fillStyle = 'rgba(150,44,34,0.45)'; g.beginPath(); g.moveTo(X(z0), gy); pts.forEach(([z, v]) => g.lineTo(X(z), Y(v))); g.lineTo(X(z0 + span), gy); g.fill();
+  g.fillStyle = 'rgba(47,150,74,0.55)'; g.beginPath(); pts.forEach(([z, v], i) => i ? g.lineTo(X(z), Y(v)) : g.moveTo(X(z), Y(v)));
+  for (let i = pts.length - 1; i >= 0; i--) g.lineTo(X(pts[i][0]), Y(Math.max(0, pts[i][1] - 10))); g.fill();
+  g.strokeStyle = '#7dff8a'; g.lineWidth = 0.8; g.beginPath(); pts.forEach(([z, v], i) => i ? g.lineTo(X(z), Y(v)) : g.moveTo(X(z), Y(v))); g.stroke();
+  // seuil de déraillement dans les virages
+  g.strokeStyle = 'rgba(255,58,42,0.8)'; g.setLineDash([2, 1.5]);
+  g.setLineDash([]);
+  {
+    // seuil de déraillement : il épouse le profil (descente de freinage puis plateau du virage), 4 km/h au-dessus
+    const dp = []; for (let z = z0; z <= z0 + span + 0.01; z += 0.5) { const e = derailEnv(z); dp.push([z, e < 900 ? e + BEND_TOL : null]); }
+    let seg = [];
+    const flush = () => {
+      if (seg.length > 1) {
+        g.fillStyle = 'rgba(255,40,30,0.38)'; g.beginPath(); g.moveTo(X(seg[0][0]), gy); seg.forEach(([z, v]) => g.lineTo(X(z), Y(v))); g.lineTo(X(seg[seg.length - 1][0]), gy); g.fill();
+        g.strokeStyle = 'rgba(255,80,60,0.95)'; g.lineWidth = 0.9; g.setLineDash([2, 1.5]);
+        g.beginPath(); seg.forEach(([z, v], i) => i ? g.lineTo(X(z), Y(v)) : g.moveTo(X(z), Y(v))); g.stroke(); g.setLineDash([]);
+      }
+      seg = [];
+    };
+    dp.forEach(p => { if (p[1] === null || p[1] > 84) flush(); else seg.push(p); }); flush();
+  }
+  // repère « freinez ici » : là où la vitesse actuelle croise la descente du prochain virage
+  const kmh = S.v * 3.6, nb = activeBend();
+  if (nb && S.v > 1 && nb.pos > S.pos) {
+    const db = nb.pos - brakePoint(kmh, nb.lim);
+    if (db > S.pos + 0.5 && db < z0 + span) {
+      const xb = X(db), near = db - S.pos < 4;
+      g.strokeStyle = near && Math.floor(S.t * 6) % 2 ? '#ffffff' : '#ffb35e'; g.lineWidth = 1; g.setLineDash([2, 1.5]);
+      g.beginPath(); g.moveTo(xb, gy); g.lineTo(xb, gy + gh); g.stroke(); g.setLineDash([]);
+      g.fillStyle = 'rgba(8,10,14,0.85)'; g.fillRect(xb - 15, gy, 30, 7); txt('FREINEZ ICI', xb, gy + 5.5, 6, '#ffb35e', 'center');
+    }
+  }
+  // trace du conducteur et position actuelle
+  const tr = S.btrace || [];
+  g.lineWidth = 1.4; g.lineCap = 'round';
+  for (let i = 1; i < tr.length; i++) {
+    const [z1, v1] = tr[i], e = bendEnv(z1);
+    g.strokeStyle = v1 > e + 1.5 ? '#ff6b5b' : v1 < e - 10 ? '#ffd75e' : '#ffffff';
+    g.beginPath(); g.moveTo(X(tr[i - 1][0]), Y(tr[i - 1][1])); g.lineTo(X(z1), Y(v1)); g.stroke();
+  }
+  g.lineCap = 'butt';
+  const e = bendEnv(S.pos), c = kmh > e + 1.5 ? '#ff6b5b' : kmh < e - 10 ? '#ffd75e' : '#7dff8a';
+  g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(X(S.pos) - 0.25, gy, 0.5, gh);
+  g.fillStyle = 'rgba(255,255,255,0.25)'; g.beginPath(); g.arc(X(S.pos), Y(kmh), 3.5, 0, 7); g.fill();
+  g.fillStyle = c; g.beginPath(); g.arc(X(S.pos), Y(kmh), 2.2, 0, 7); g.fill();
+  g.strokeStyle = '#4a5166'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+}
+// panneau de limitation à l'entrée de chaque virage (et chevrons sur la paroi extérieure)
+function bendSprites(list) {
+  if (!S.bends) return;
+  for (const b of S.bends) {
+    if (b.sw) continue;   // passage en voie déviée : l'aiguillage a sa propre signalisation
+    const dd = b.pos - 4 - S.pos;
+    if (dd > NEAR + 0.3 && dd < 120) list.push({ d: dd, draw: d => {
+      const x = 1.95, y = 0.15, r = 0.36, [sx, sy] = P(x, y, d), rr = r * F / d;
+      if (rr < 0.8) return;
+      const [px, py] = P(x, -1.75, d);
+      g.fillStyle = '#3a3e44'; g.fillRect(sx - Math.max(0.5, 0.03 * F / d), sy, Math.max(1, 0.06 * F / d), py - sy);
+      g.fillStyle = '#f4f4f0'; g.beginPath(); g.arc(sx, sy, rr, 0, 7); g.fill();
+      g.strokeStyle = '#d42a2a'; g.lineWidth = Math.max(0.6, rr * 0.22); g.beginPath(); g.arc(sx, sy, rr * 0.86, 0, 7); g.stroke();
+      if (rr > 3) txt(String(b.lim), sx, sy + rr * 0.38, Math.max(5, Math.round(rr * 1.05)), '#111', 'center');
+      glow(sx, sy, Math.min(30, rr * 2.2), '255,255,240', 0.12);
+    } });
+    // chevrons jaunes et noirs sur la paroi extérieure du virage
+    for (let z = b.pos + 4; z < b.pos + b.len - 2; z += 6) {
+      const dc = z - S.pos; if (dc < NEAR + 0.3 || dc > 90) continue;
+      const side = -b.dir;
+      list.push({ d: dc, draw: d => {
+        const xw = side * 2.26, [ax, ay] = P(xw, 0.75, d), [, by] = P(xw, 0.25, d), hw = 0.28 * F / d;
+        if (hw < 0.7) return;
+        g.fillStyle = '#e8c020'; g.fillRect(ax - hw, ay, hw * 2, by - ay);
+        g.strokeStyle = '#111'; g.lineWidth = Math.max(0.5, hw * 0.28);
+        const pt = side > 0 ? -1 : 1;   // pointe vers l'intérieur du virage
+        for (const o of [-0.45, 0.2]) { g.beginPath(); g.moveTo(ax + o * hw * 2 - pt * hw * 0.3, ay + 1); g.lineTo(ax + o * hw * 2 + pt * hw * 0.35, (ay + by) / 2); g.lineTo(ax + o * hw * 2 - pt * hw * 0.3, by - 1); g.stroke(); }
+      } });
+    }
   }
 }
 function updateSwitch(dt) {
   const w = S.sw; if (!w || S.phase !== 'drive') return;
   const dp = w.sig - S.pos;
   if (w.kind === 'merge' && w.eta === null && dp < 190) {
-    w.eta = S.clock + dp / VMAX + 1.5 + Math.random() * 3; w.start = S.clock;   // à pleine vitesse, on bute sur le rouge : il faut ralentir tôt
+    w.eta = S.clock + dp / VMAX + 0.5 + Math.random() * 1.3; w.start = S.clock;   // le train traverse juste devant nous : il suffit d'ajuster l'allure, à peine
     w.t0 = w.eta - X_CLEAR / X_V;
     msg('Signal jaune : un train va traverser votre voie. Laissez-le passer !', '#ffd75e', 3.5);
     beep(1250, 0.1, 'square', 0.04); beep(1250, 0.1, 'square', 0.04, 0.2);
   }
   if (w.kind === 'fork' && w.fixT > 0) {
     w.fixT -= dt;
-    if (w.fixT <= 0) { w.fixT = 0; w.set = w.tgt; msg(`Aiguille en position ${w.set === 'D' ? 'DIRECT' : 'DÉVIÉ'} : signal ouvert`, w.set === w.want ? '#7dff8a' : '#ffd75e', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
+    if (w.fixT <= 0) { w.fixT = 0; w.set = w.tgt; if (!w.tot) msg(`Aiguille en position ${w.set === 'D' ? 'DIRECT' : 'DÉVIÉ'} : signal ouvert`, w.set === w.want ? '#7dff8a' : '#ffd75e', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
   }
   if (w.kind === 'fork' && w.chg && !w.passed && w.pos - S.pos < 150 && w.pos - S.pos > 70) {   // le PCC change d'itinéraire en route
     w.chg = false; w.want = w.want === 'D' ? 'G' : 'D'; w.chgT = S.t;
@@ -1435,16 +2161,34 @@ function updateSwitch(dt) {
   }
   if (w.kind === 'fork') {
     const inZ = w.set === 'G' && S.pos > w.pos - 3 && S.pos < w.pos + SW_DEV + 5;
-    if (inZ) { S.limit = 30; w.limOn = true; } else if (w.limOn) { S.limit = 0; w.limOn = false; }
+    if (inZ && !FIRE()) { S.limit = 30; w.limOn = true; } else if (w.limOn) { S.limit = 0; w.limOn = false; }
     if (!w.passed && S.pos > w.pos) {
       w.passed = true;
       if (w.set !== w.want) {
         S.ebrake = true; S.rev = { t: 0 }; if (!w.bad) { w.bad = true; S.swBad = (S.swBad || 0) + 1; }
         pen(-100, `Mauvais itinéraire : la rame part en voie ${w.set === 'D' ? 'directe' : 'déviée'} !`);
         for (let i = 0; i < 3; i++) beep(330, 0.2, 'sawtooth', 0.05, i * 0.25);
+      } else if (w.tot) {
+        S.score += 25; pop0(`+25`); beep(1047, 0.07, 'square', 0.04);
+        if (!w.chain) { S.score += 60; msg(`Grill franchi sans erreur ! (+${25 * w.tot + 60})`, '#7dff8a', 3); }
       } else if (w.chose && (w.wrong0 || w.chgT)) { S.score += 30; msg('Bonne direction prise (+30)', '#7dff8a', 2.5); }
     }
+    if (w.chain > 0 && w.passed && !S.rev && S.pos > zBof(w) + 2) nextChainFork(w);
   }
+}
+const pop0 = t => msg(t, '#7dff8a', 1);
+// grill d'aiguillages : dès que la rame a dégagé une aiguille, la suivante apparaît un peu plus loin
+function nextChainFork(w0) {
+  const nx = w0.plan[w0.idx], pos = nx.pos;   // exactement là où on la voyait déjà au bout du tube
+  if (S.limit === 30 && w0.limOn) S.limit = 0;
+  const w = S.sw = { kind: 'fork', pos, sig: pos - SW_SIG, d0: pos - S.pos, want: Math.random() < 0.5 ? 'G' : 'D', set: 'D', fixT: 0, called: false, passed: false, sigPassed: false, eta: null, start: 0, stopped: false, done: false, limOn: false,
+    chain: w0.chain - 1, idx: w0.idx + 1, tot: w0.tot, fix: CH_FIX, lock: CH_LOCK, lead: CH_LEAD, chg: false, plan: w0.plan };
+  w.want = nx.want;
+  if (S.swQueue) { w.chose = true; S.swQueue = null; }   // déjà en position : signal vert, pas d'attente
+  w.set = w.tgt = nx.set0; w.wrong0 = w.set !== w.want;
+  S.swN = (S.swN || 0) + 1;
+  msg(`Aiguille ${w.idx}/${w.tot} : ${w.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}`, w.want === 'D' ? '#9fe0ff' : '#ffd75e', 2);
+  beep(w.want === 'D' ? 880 : 1175, 0.08, 'square', 0.05);
 }
 const REV_T = 5;      // retour en marche arrière : 5 s à l'écran, environ 20 s d'horaire perdues
 function updateReverse(dt) {
@@ -1457,87 +2201,77 @@ function updateReverse(dt) {
   }
 }
 // ---- manœuvre manuelle de l'aiguille (mini-jeu) ----
-const MG_LOOK = () => Object.assign(mkPerson(0, 0), { kind: 'adult', kid: null, acc: null, acc2: null, bag: '#1f2a44', c: '#2a3c6e', pants: '#1f2a44', outfit: 'coat', hat: 'cap', glasses: false, scarf: null, slow: 1, party: false, suspect: false, h: 1.75, build: 1 });
+// ---- aiguille en panne : commande de secours en cabine, un jeu de flèches en rythme ----
+// les flèches montent vers la ligne cible : appuyer sur la bonne direction (← ↓ ↑ → ou Q S Z D) quand elles l'atteignent
+const DDR_DIRS = ['L', 'D', 'U', 'R'], DDR_TRAVEL = 1.5, DDR_PERF = 0.09, DDR_GOOD = 0.18, DDR_N = 8, DDR_NEED = 6;
 const canManual = () => { const w = S.sw; return w && w.kind === 'manual' && !w.done && !S.mg && S.phase === 'drive' && S.v === 0 && w.sig - S.pos > -0.5 && w.sig - S.pos < 40; };
+function ddrNotes(t0) {
+  const n = []; let t = t0;
+  for (let i = 0; i < DDR_N; i++) { n.push({ t, dir: DDR_DIRS[Math.floor(Math.random() * 4)], res: null }); t += pick([0.45, 0.6, 0.6, 0.75]); }
+  return n;
+}
 function startManual() {
-  S.mg = { ph: 'walk', x: 0, hits: 0, t: 0, ct: 0, flash: 0, ok: 0, look: MG_LOOK(), walk: 0, zone: 0.16 };
-  noise(0.4, 0.2, 'highpass', 2500, 0.7); beep(85, 0.25, 'triangle', 0.3, 0.3);
-  msg('Vous descendez sur la piste. → (ou D) pour marcher jusqu\'à l\'aiguille', '#9fe0ff', 3);
+  S.mg = { t: 0, notes: ddrNotes(DDR_TRAVEL + 0.6), hits: 0, perf: 0, combo: 0, fb: null, fbT: 0, flash: 0, lane: [0, 0, 0, 0], tries: 1 };
+  beep(523, 0.08, 'square', 0.05); beep(784, 0.1, 'square', 0.05, 0.1);
 }
 function updateManual(dt) {
-  const m = S.mg; if (!m) return;
-  m.t += dt; m.flash = Math.max(0, m.flash - dt); m.ok = Math.max(0, m.ok - dt);
-  const R = keys['arrowright'] || keys['d'], Lk = keys['arrowleft'] || keys['q'];
-  if (m.ph === 'walk' && R) { m.x = Math.min(1, m.x + dt / 2.4); m.walk += dt * 9; if (m.x >= 1) { m.ph = 'crank'; m.ct = 0; msg('ESPACE quand le curseur est dans la zone verte (3 fois)', '#ffd75e', 3); } }
-  if (m.ph === 'crank') m.ct += dt;
-  if (m.ph === 'back' && Lk) { m.x = Math.max(0, m.x - dt / 2.4); m.walk += dt * 9; if (m.x <= 0) finishManual(); }
-}
-const mgCursor = m => 0.5 + 0.5 * Math.sin(m.ct * (3.2 + m.hits * 0.9));
-function mgHit() {
-  const m = S.mg; if (!m || m.ph !== 'crank') return;
-  if (Math.abs(mgCursor(m) - 0.5) < m.zone / 2) {
-    m.hits++; m.ok = 0.35; m.zone *= 0.85;
-    beep(140, 0.15, 'square', 0.12); noise(0.15, 0.3, 'lowpass', 900, 0.8);
-    if (m.hits >= 3) {
-      m.ph = 'back'; S.sw.done = true;
-      beep(70, 0.3, 'triangle', 0.35, 0.1); noise(0.2, 0.4, 'lowpass', 600, 0.8, 0.1);
-      msg('Aiguille calée et verrouillée ! ← (ou Q) pour remonter en cabine', '#7dff8a', 3);
+  if (!S.mg) { if (canManual()) startManual(); return; }   // à l'arrêt devant le signal : la commande de secours s'ouvre d'elle-même
+  const m = S.mg;
+  m.t += dt; m.fbT = Math.max(0, m.fbT - dt); m.flash = Math.max(0, m.flash - dt); m.lane = m.lane.map(v => Math.max(0, v - dt));
+  for (const n of m.notes) if (!n.res && m.t > n.t + DDR_GOOD) { n.res = 'miss'; m.combo = 0; m.fb = 'RATÉ'; m.fbT = 0.5; }
+  if (m.notes.every(n => n.res)) {
+    if (m.hits >= DDR_NEED) finishManual();
+    else {   // pas assez de coups justes : l'aiguille n'est pas calée, on recommence
+      m.tries++; m.hits = 0; m.perf = 0; m.combo = 0; m.notes = ddrNotes(m.t + DDR_TRAVEL + 0.4); S.score -= 20;
+      msg(`L'aiguille n'est pas calée (${DDR_NEED} flèches justes sur ${DDR_N} nécessaires) : on recommence (−20)`, '#ff8a5b', 3); sfxBad();
     }
-  } else { m.flash = 0.35; sfxBad(); }
+  }
+}
+function mgHit(dir) {
+  const m = S.mg; if (!m || !dir) return;
+  m.lane[DDR_DIRS.indexOf(dir)] = 0.15;
+  const n = m.notes.filter(x => !x.res && x.dir === dir).sort((a, b) => Math.abs(a.t - m.t) - Math.abs(b.t - m.t))[0];
+  const dt = n ? Math.abs(n.t - m.t) : 9;
+  if (n && dt <= DDR_GOOD) {
+    n.res = dt <= DDR_PERF ? 'perf' : 'good'; m.hits++; m.combo++; if (n.res === 'perf') m.perf++;
+    S.score += n.res === 'perf' ? 10 : 5; m.fb = n.res === 'perf' ? 'PARFAIT !' : 'BIEN'; m.fbT = 0.5;
+    beep(n.res === 'perf' ? 880 + 60 * Math.min(8, m.combo) : 660, 0.07, 'square', 0.05); noise(0.08, 0.15, 'lowpass', 900, 0.8);
+  } else { m.combo = 0; m.flash = 0.25; m.fb = 'TROP TÔT'; m.fbT = 0.4; beep(180, 0.08, 'square', 0.04); }
 }
 function finishManual() {
-  const m = S.mg; S.mg = null;
-  noise(0.4, 0.2, 'highpass', 2500, 0.7); beep(85, 0.25, 'triangle', 0.3, 0.2);
-  if (m.t < 13) { S.score += 40; msg(`Manœuvre rondement menée en ${Math.round(m.t)} s (+40). Signal ouvert, repartez !`, '#7dff8a', 3.5); }
-  else msg(`Manœuvre terminée en ${Math.round(m.t)} s. Signal ouvert, repartez`, '#9fe0ff', 3);
+  const m = S.mg; S.mg = null; S.sw.done = true;
+  beep(70, 0.3, 'triangle', 0.35); noise(0.2, 0.4, 'lowpass', 600, 0.8);
+  const all = m.perf === DDR_N ? 40 : 0; S.score += all;
+  msg(`Aiguille calée et verrouillée${all ? ' : sans-faute ! (+40)' : ''}. Signal ouvert, repartez !`, '#7dff8a', 3.5);
+}
+// flèche style « tapis de danse » : pointe dans la direction donnée
+function ddrArrow(cx, cy, r, dir, fill, stroke) {
+  const a = { L: Math.PI, D: Math.PI / 2, U: -Math.PI / 2, R: 0 }[dir], P2 = (u, v) => [cx + u * Math.cos(a) - v * Math.sin(a), cy + u * Math.sin(a) + v * Math.cos(a)];
+  const pts = [[r, 0], [0, -r], [0, -r * 0.42], [-r, -r * 0.42], [-r, r * 0.42], [0, r * 0.42], [0, r]].map(([u, v]) => P2(u, v));
+  g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
+  if (fill) { g.fillStyle = fill; g.fill(); }
+  if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1.2; g.stroke(); }
 }
 function drawManual() {
   const m = S.mg; if (!m) return;
-  const yR = 128, sc = 34;
-  g.fillStyle = '#0b0c12'; g.fillRect(0, 0, W, VIEW_H);
-  // piédroit du tunnel, lampes, câbles
-  const wg = g.createLinearGradient(0, 10, 0, yR); wg.addColorStop(0, '#15161c'); wg.addColorStop(1, '#2a2a30');
-  g.fillStyle = wg; g.fillRect(0, 14, W, yR - 14);
-  for (let x = 30; x < W; x += 120) { glow(x, 40, 60, '255,200,110', 0.25); g.fillStyle = '#ffe0a0'; g.fillRect(x - 5, 37, 10, 5); }
-  [[60, '#1d1a14'], [66, '#2a1414'], [72, '#121216']].forEach(([y, c]) => { g.fillStyle = c; g.fillRect(0, y, W, 3); });
-  for (let x = 12; x < W; x += 34) { g.fillStyle = '#3a3a40'; g.fillRect(x, 58, 2, 18); }
-  // piste de service, ballast, rail, traverses
-  g.fillStyle = '#3e3c40'; g.fillRect(0, yR, W, 8); g.fillStyle = '#c8b43c'; g.fillRect(0, yR, W, 1);
-  g.fillStyle = '#1c1a1a'; g.fillRect(0, yR + 8, W, VIEW_H - yR - 8);
-  for (let x = 0; x < W; x += 14) { g.fillStyle = '#3a2e24'; g.fillRect(x, yR + 22, 9, 4); }
-  g.fillStyle = '#9aa0ac'; g.fillRect(0, yR + 19, W, 3);
-  // la rame à l'arrêt (avant, à gauche)
-  g.fillStyle = '#d6dce4'; g.fillRect(-10, 70, 96, yR + 16 - 70); g.fillStyle = '#9aa2ae'; g.fillRect(-10, 70, 96, 4);
-  g.fillStyle = '#1a2230'; g.fillRect(48, 82, 32, 24); g.fillStyle = '#2e6fb8'; g.fillRect(-10, yR - 2, 96, 4);
-  g.fillStyle = '#fff4c8'; g.fillRect(78, yR - 14, 8, 5); glow(90, yR - 12, 40, '255,240,190', 0.35);
-  g.fillStyle = LN().col; g.beginPath(); g.arc(30, 92, 7, 0, 7); g.fill(); txt(LN().num, 30, 96, 11, LN().fg, 'center');
-  // signal rouge et aiguille
-  const red = !S.sw || !S.sw.done, sx = 250;
-  g.fillStyle = '#2c2f38'; g.fillRect(sx, 66, 3, yR - 66); g.fillStyle = '#0e0f12'; g.fillRect(sx - 5, 52, 13, 22);
-  circ(sx + 1.5, 58, 3.5, red ? '#ff2a2a' : '#3a1414'); circ(sx + 1.5, 68, 3.5, red ? '#103a1a' : '#3dff6a');
-  glow(sx + 1.5, red ? 58 : 68, 16, red ? '255,40,40' : '60,255,100', 0.35);
-  const lx = 316, ang = -1.1 + Math.min(3, m.hits) / 3 * 2.2;      // levier : bascule d'un côté à l'autre
-  g.fillStyle = '#e0a020'; g.fillRect(lx - 14, yR + 6, 28, 8); g.fillStyle = '#222'; for (let k = 0; k < 4; k++) g.fillRect(lx - 12 + k * 7, yR + 6, 3, 8);
-  seg(lx, yR + 7, lx + Math.sin(ang) * 30, yR + 7 - Math.cos(ang) * 30, 3, '#d8d8d8');
-  circ(lx + Math.sin(ang) * 30, yR + 7 - Math.cos(ang) * 30, 3, '#d42a2a');
-  g.fillStyle = '#c8ccd4'; g.fillRect(lx + 14, yR + 17, 60, 2); g.save(); g.translate(lx + 14, yR + 19); g.rotate(-0.06 + Math.min(3, m.hits) * 0.04); g.fillRect(0, -1, 60, 2); g.restore();
-  // le conducteur
-  const px = 96 + m.x * (lx - 26 - 96);
-  m.look.dir = m.ph === 'back' ? -1 : 1;
-  drawPerson(px, yR, sc, m.look, m.ph === 'crank' ? 0 : m.walk);
-  g.fillStyle = '#ffe14a'; g.fillRect(px - 6, yR - 40, 12, 3);   // gilet haute visibilité
-  // consignes
-  g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 120, 4, 240, 22);
-  txt('MANŒUVRE MANUELLE DE L\'AIGUILLE', W / 2, 13, 11, '#ffd75e', 'center');
-  txt(m.ph === 'walk' ? '→ ou D : marcher jusqu\'au levier' : m.ph === 'crank' ? `ESPACE dans la zone verte : ${m.hits} / 3` : '← ou Q : remonter en cabine', W / 2, 23, 10, '#ffffff', 'center');
-  txt(`⏱ ${Math.floor(m.t)} s`, W - 8, 13, 11, m.t < 13 ? '#7dff8a' : '#ffb35e', 'right');
-  if (m.ph === 'crank') {
-    const bx = W / 2 - 80, by = 60, bw = 160;
-    g.fillStyle = m.flash ? 'rgba(255,40,40,0.9)' : 'rgba(6,8,14,0.9)'; g.fillRect(bx - 3, by - 3, bw + 6, 14);
-    g.fillStyle = '#333a48'; g.fillRect(bx, by, bw, 8);
-    g.fillStyle = m.ok ? '#c8ffd0' : '#3dff6a'; g.fillRect(bx + bw * (0.5 - m.zone / 2), by, bw * m.zone, 8);
-    const cx = bx + bw * mgCursor(m); g.fillStyle = '#ffffff'; g.fillRect(cx - 1, by - 3, 3, 14);
+  const lw = 30, x0 = W / 2 - lw * 2, top = 34, bot = 160, ty = top + 12, COL = { L: '#ff5ab0', D: '#4ab0ff', U: '#7dff8a', R: '#ffb33a' };
+  g.fillStyle = m.flash ? 'rgba(90,10,10,0.82)' : 'rgba(6,8,14,0.82)'; g.fillRect(x0 - 8, top - 26, lw * 4 + 16, bot - top + 30);
+  g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.strokeRect(x0 - 7.5, top - 25.5, lw * 4 + 15, bot - top + 29);
+  txt('AIGUILLE EN PANNE · COMMANDE DE SECOURS', W / 2, top - 16, 10, '#ffd75e', 'center', 'VT323', lw * 4 + 12);
+  txt(`${m.hits} / ${DDR_NEED} flèches justes${m.combo > 1 ? `  ·  combo ×${m.combo}` : ''}`, W / 2, top - 6, 10, '#e6ecf5', 'center', 'VT323', lw * 4 + 12);
+  DDR_DIRS.forEach((d, i) => {
+    const cx = x0 + lw * i + lw / 2;
+    g.fillStyle = 'rgba(255,255,255,0.04)'; g.fillRect(x0 + lw * i + 1, top, lw - 2, bot - top);
+    ddrArrow(cx, ty, 10, d, m.lane[i] > 0 ? COL[d] : 'rgba(255,255,255,0.08)', '#c8ccd6');    // cible
+  });
+  for (const n of m.notes) {
+    if (n.res && n.res !== 'miss') continue;
+    const k = (n.t - m.t) / DDR_TRAVEL; if (k > 1 || k < -0.2) continue;
+    const cx = x0 + lw * DDR_DIRS.indexOf(n.dir) + lw / 2, cy = ty + k * (bot - ty);
+    ddrArrow(cx, cy, 10, n.dir, n.res === 'miss' ? 'rgba(120,120,130,0.6)' : COL[n.dir], '#ffffff');
   }
+  if (m.fbT > 0) txt(m.fb, W / 2, ty + 32, 10, m.fb === 'PARFAIT !' ? '#7dff8a' : m.fb === 'BIEN' ? '#9fe0ff' : '#ff6b5b', 'center', '"Press Start 2P"');
+  txt('← ↓ ↑ →  ou  Q S Z D', W / 2, bot - 2, 9, '#8fa0b8', 'center');
 }
 function drawReverse() {
   const r = S.rev; if (!r) return;
@@ -1547,36 +2281,6 @@ function drawReverse() {
   txt('Le PCC retrace l\'aiguille… l\'horaire tourne', W / 2, 86, 11, '#cfd6e6', 'center');
   g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(W / 2 - 70, 94, 140, 4);
   g.fillStyle = '#ffb35e'; g.fillRect(W / 2 - 70, 94, 140 * Math.min(1, r.t / REV_T), 4);
-}
-// écran d'itinéraire en cabine : direction demandée par le PCC et sélecteur ← →
-function drawSwitchPanel() {
-  const w = S.sw; if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return;
-  const dp = w.pos - S.pos; if (dp < 0) return;
-  const cam = S.camAt !== undefined && S.t - S.camAt < 0.15;     // caméra intérieure ouverte : l'écran se range à sa droite
-  const x = cam ? 160 : 6, y = cam ? VIEW_H - 64 : 62, bw = 76, bh = 60, ok = w.tgt === w.want, lock = dp < SW_LOCK;
-  const chg = w.chgT && S.t - w.chgT < 3 && Math.floor(S.t * 6) % 2;
-  g.fillStyle = 'rgba(6,8,14,0.92)'; g.fillRect(x, y, bw, bh);
-  g.strokeStyle = chg ? '#ffb35e' : ok ? '#4f6a86' : (Math.floor(S.t * 4) % 2 ? '#ff4a3a' : '#7a2a26'); g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
-  txt('ITINÉRAIRE', x + 4, y + 8, 8, '#8fa0b8');
-  txt(`${Math.round(dp)} m`, x + bw - 4, y + 8, 8, '#ffffff', 'right');
-  // direction demandée
-  const term = STATIONS[STATIONS.length - 1].name;
-  txt('PCC :', x + 4, y + 18, 8, '#8fa0b8');
-  txt(w.want === 'D' ? `DIRECT › ${term}` : 'DÉVIÉ · 30 km/h', x + 22, y + 18, 9, chg ? '#ffb35e' : '#9fe0ff', 'left', 'VT323', bw - 26);
-  // deux touches de sélection
-  const opt = (k, bx, label) => {
-    const sel = w.tgt === k, good = k === w.want, by = y + 24, ww = 34, hh = 22;
-    g.fillStyle = sel ? (good ? '#12351c' : '#3a1210') : '#11151e'; g.fillRect(bx, by, ww, hh);
-    g.strokeStyle = sel ? (good ? '#7dff8a' : '#ff6b5b') : '#2c3442'; g.lineWidth = sel ? 1.5 : 1; g.strokeRect(bx + 0.5, by + 0.5, ww - 1, hh - 1);
-    const cx = bx + ww / 2, cy = by + 9, col = sel ? '#ffffff' : '#5a6474';
-    if (k === 'D') { seg(cx, cy + 5, cx, cy - 4, 2, col); seg(cx, cy - 5, cx - 3, cy - 2, 2, col); seg(cx, cy - 5, cx + 3, cy - 2, 2, col); }
-    else { seg(cx - 4, cy + 5, cx + 4, cy - 4, 2, col); seg(cx + 4, cy - 5, cx, cy - 4, 2, col); seg(cx + 4, cy - 5, cx + 4, cy - 1, 2, col); }
-    txt(label, cx, by + 19, 8, sel ? (good ? '#7dff8a' : '#ff6b5b') : '#5a6474', 'center');
-  };
-  opt('D', x + 3, '← DIRECT'); opt('G', x + 39, 'DÉVIÉ →');
-  // état de l'aiguille
-  const st = w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', '#ffd75e'] : lock ? ['VERROUILLÉE', '#8fa0b8'] : ok ? ['DIRECTION CORRECTE', '#7dff8a'] : ['MAUVAISE DIRECTION !', '#ff6b5b'];
-  if (w.fixT <= 0 || Math.floor(S.t * 4) % 2) txt(st[0], x + bw / 2, y + bh - 5, 8, st[1], 'center', 'VT323', bw - 6);
 }
 function xingSprites(w, list, yf) {
   const NX = XZ, NZ = -XU;                                     // normale côté droit (tournée vers nous)
@@ -1628,44 +2332,53 @@ function xingSprites(w, list, yf) {
   }
 }
 function swSprites(list) {
-  const w = S.sw; if (!w) return;
-  const yf = -2;
-  // branche (rails qui divergent ou convergent) et bouche du tunnel annexe à droite
-  const z0 = w.pos;
-  if (w.kind === 'fork') for (let z = z0; z < z0 + SW_LEN; z += 2) {
-    const d = z - S.pos; if (d < NEAR + 0.3 || d > DMAX) continue;
-    list.push({ d, draw: dd => {
-      const a = swOff(w, z), b = swOff(w, z + 2); if (a === null || b === null) return;
-      const d1 = dd + 2, f = Math.max(0.12, 1 - dd / 150);
-      if (Math.max(a, b) > 1.6) {   // ouverture dans le piédroit droit
-        poly([[2.29, yf, d1], [2.29, 0.9, d1], [2.29, 0.9, dd], [2.29, yf, dd]], '#020203');
-      }
-      for (const rx of [-0.72, 0.72]) {
-        const xa = rx + a, xb = rx + b; if (Math.min(xa, xb) > 2.25) continue;
-        const ca = Math.min(2.25, xa), cb = Math.min(2.25, xb);
-        poly([[cb - 0.04, yf + 0.12, d1], [cb + 0.04, yf + 0.12, d1], [ca + 0.04, yf + 0.12, dd], [ca - 0.04, yf + 0.12, dd]], sh(C.rail, Math.max(f, 0.3)));
-      }
-    } });
+  if (!S.sw) return;
+  swSpritesW(S.sw, list, false);
+  const gh = swGhost(); if (gh) swSpritesW(gh, list, true);
+}
+function swSpritesW(w, L0, gh) {
+  const yf = -2, list = { push: o => L0.push(gh ? Object.assign(o, { gh: true }) : o) };
+  // branche déviée : rails et traverses qui s'écartent en S jusqu'à la tête des tubes
+  if (w.kind === 'fork') {
+    const zB = zBof(w);
+    for (let z = w.pos; z < zB; z += 2) {
+      const d = z - S.pos; if (d < NEAR + 0.3 || d > DMAX) continue;
+      list.push({ d, cs: true, draw: dd => {
+        const a = brOff(w, z), b = brOff(w, z + 2), d1 = dd + 2, f = Math.max(0.3, 1 - dd / 150);
+        if (a > 1.45) for (const q of [0.1, 1.1]) poly([[a - 1.0, yf + 0.06, dd + q + 0.25], [a + 1.0, yf + 0.06, dd + q + 0.25], [a + 1.0, yf + 0.06, dd + q], [a - 1.0, yf + 0.06, dd + q]], sh([70, 60, 52], f));
+        for (const rx of [-0.72, 0.72]) {
+          if (a < 1.44 && rx < 0) continue;   // le rail gauche de la branche se confond d'abord avec la voie directe
+          poly([[rx + b - 0.06, yf + 0.14, d1], [rx + b + 0.06, yf + 0.14, d1], [rx + a + 0.06, yf + 0.14, dd], [rx + a - 0.06, yf + 0.14, dd]], sh([205, 210, 220], Math.max(f, 0.45)));
+        }
+      } });
+    }
+    const dB = zB - S.pos;
+    const SVw = gh ? { zB, onBr: false, setG: w.set === 'G' } : swView();
+    if (dB > NEAR + 0.3 && dB < DMAX) list.push({ d: dB, cs: true, draw: dd => drawHeadwall(w, dd, SVw) });
+    // barrière dans le tube emprunté (la voie droit devant mène à une fin de voie)
+    const notWant = w.want === 'D' ? 'br' : 'main', taken = SVw && SVw.setG ? 'br' : 'main', dK = zB + 12 - S.pos;
+    if (!gh && notWant === taken && dK > NEAR + 0.3 && dK < DMAX) list.push({ d: dK, draw: dd => drawBarrier(0, dd) });
   }
   // lames d'aiguille : un trait brillant contre le rail de la voie tracée
   const dA = w.pos - S.pos;
   if (w.kind === 'fork' && dA > NEAR + 0.3 && dA < 70) list.push({ d: dA, draw: d => {
+    if (!w.set) return;
     const rx = w.set === 'D' ? 0.62 : -0.62;
     poly([[rx - 0.03, yf + 0.13, d + 4], [rx + 0.03, yf + 0.13, d + 4], [rx + 0.03, yf + 0.13, d], [rx - 0.03, yf + 0.13, d]], '#e8ecf4');
   } });
   if (w.kind === 'merge') xingSprites(w, list, yf);
   // signaux : signal d'aiguille, et signal d'avertissement 110 m avant la convergence
-  const sigs = [[w.sig, () => swRed() ? 'r' : 'g']];
+  const sigs = [[w.sig, () => gh ? 'g' : swRed() ? 'r' : 'g']];
   if (w.kind === 'merge') sigs.push([w.pos - 110, () => swRed() || w.eta === null ? 'y' : 'g']);
   sigs.forEach(([pz, st]) => { const d = pz - S.pos; if (d > NEAR + 0.3 && d < DMAX) list.push({ d, draw: dd => drawSigHead(dd, st()) }); });
   // indicateur d'itinéraire et panneau 30 de la voie déviée
   const di = w.pos - 45 - S.pos;
-  if (w.kind === 'fork' && di > NEAR + 0.3 && di < DMAX) list.push({ d: di, draw: d => {
+  if (!gh && !w.tot && w.kind === 'fork' && di > NEAR + 0.3 && di < DMAX) list.push({ d: di, draw: d => {
     const [cx0, cy0] = P(-1.95, 0.9, d), s0 = F / d;
     const bw = Math.max(2, Math.round(0.75 * s0)), bh = bw, X = Math.round(cx0 - bw / 2), Y = Math.round(cy0 - bh / 2);
     g.fillStyle = '#2c2f38'; g.fillRect(Math.round(cx0 - 0.05 * s0), Y + bh, Math.max(1, Math.round(0.1 * s0)), Math.round(P(-1.95, -2, d)[1] - Y - bh));
     g.fillStyle = '#08090c'; g.fillRect(X, Y, bw, bh);
-    if (bw > 5 && w.fixT <= 0) {
+    if (bw > 5 && w.fixT <= 0 && w.set) {
       const cx = X + bw / 2, cy = Y + bh / 2, r = bh * 0.32, lw = Math.max(1, bh * 0.1);
       if (w.set === 'D') { seg(cx, cy + r, cx, cy - r, lw, '#ffffff'); seg(cx, cy - r, cx - r * 0.5, cy - r * 0.4, lw, '#ffffff'); seg(cx, cy - r, cx + r * 0.5, cy - r * 0.4, lw, '#ffffff'); }
       else { seg(cx - r * 0.6, cy + r, cx + r * 0.6, cy - r * 0.7, lw, '#ffffff'); seg(cx + r * 0.6, cy - r * 0.7, cx, cy - r * 0.7, lw, '#ffffff'); seg(cx + r * 0.6, cy - r * 0.7, cx + r * 0.55, cy, lw, '#ffffff'); }
@@ -1673,7 +2386,7 @@ function swSprites(list) {
     }
   } });
   const dl = w.pos - 60 - S.pos;
-  if (w.kind === 'fork' && w.set === 'G' && dl > NEAR + 0.3 && dl < DMAX) list.push({ d: dl, draw: d => {
+  if (!gh && !FIRE() && w.kind === 'fork' && w.set === 'G' && dl > NEAR + 0.3 && dl < DMAX) list.push({ d: dl, draw: d => {
     const [x0, y0] = P(-2.5, 0.2, d), [x1, y1] = P(-1.9, -0.4, d);
     g.fillStyle = '#111'; g.fillRect(Math.round(x0) - 1, Math.round(y0) - 1, Math.round(x1 - x0) + 2, Math.round(y1 - y0) + 2);
     g.fillStyle = '#ffd400'; g.fillRect(Math.round(x0), Math.round(y0), Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)));
@@ -1687,18 +2400,28 @@ function swSprites(list) {
     if (!w.done && Math.floor(S.t * 3) % 2) glow(bx, ty, Math.min(30, 1.5 * s), '255,180,60', 0.4);
   } });
 }
+const SIG_FLARES = [];
 function drawSigHead(d, st) {
-  const sc = F / d;
-  const [bx, by] = P(-1.9, -2, d), [, ty] = P(-1.9, 1.1, d);
+  // signal sur potence, décollé du piédroit, à sa taille réelle ; seuls les feux restrictifs (rouge, jaune)
+  // gardent un halo renforcé, redessiné après les phares, pour être repérés de loin
+  const sc = F / d, xs = -1.45;
+  const [bx, by] = P(xs, -2, d), [, ty] = P(xs, 1.45, d);
+  const hw = Math.max(2, Math.round(0.8 * sc)), hh = Math.max(4, Math.round(1.6 * sc));
+  const X = Math.round(bx - hw / 2), Y = Math.round(ty), lr = Math.max(0.7, hw * 0.3);
   const pw = Math.max(1, Math.round(0.12 * sc));
-  g.fillStyle = '#2c2f38'; g.fillRect(Math.round(bx - pw / 2), Math.round(ty), pw, Math.round(by - ty));
-  const hw = Math.max(3, Math.round(0.7 * sc)), hh = Math.max(5, Math.round(1.4 * sc));
-  const X = Math.round(bx - hw / 2), Y = Math.round(ty - hh), lr = Math.max(1, Math.round(hw * 0.3));
+  g.fillStyle = '#3a3e48'; g.fillRect(Math.round(bx - pw / 2), Y + hh, pw, Math.max(0, Math.round(by - Y - hh)));
+  if (hw >= 5) { const m = Math.max(1, Math.round(hw * 0.15)); g.fillStyle = '#d8d8d8'; g.fillRect(X - m, Y - m, hw + 2 * m, hh + 2 * m); }
   g.fillStyle = '#0e0f12'; g.fillRect(X, Y, hw, hh);
-  const lamps = [['r', 0.22, '#ff2a2a', '#3a1414', '255,40,40'], ['y', 0.5, '#ffc21a', '#3a2c10', '255,190,30'], ['g', 0.78, '#3dff6a', '#103a1a', '60,255,100']];
+  const lamps = [['r', 0.2, '#ff2a2a', '#3a1414', '255,40,40'], ['y', 0.5, '#ffc21a', '#3a2c10', '255,190,30'], ['g', 0.8, '#3dff6a', '#103a1a', '60,255,100']];
   lamps.forEach(([k, fy, on, off, rgb]) => {
-    g.fillStyle = st === k ? on : off; g.beginPath(); g.arc(X + hw / 2, Y + hh * fy, lr, 0, 7); g.fill();
-    if (st === k) glow(X + hw / 2, Y + hh * fy, Math.min(40, lr * 3), rgb, 0.35);
+    const lx = X + hw / 2, ly = Y + hh * fy, lit = st === k;
+    g.fillStyle = lit ? on : off; g.beginPath(); g.arc(lx, ly, lr, 0, 7); g.fill();
+    if (!lit) return;
+    glow(lx, ly, Math.min(40, lr * 4), rgb, 0.4);
+    if (k !== 'g') {
+      SIG_FLARES.push([lx, ly, lr, rgb, on]);
+      if (d < 70) for (const rx of [-0.72, 0.72]) { const [rxp, ryp] = P(rx, -1.88, d + 1); glow(rxp, ryp, Math.min(26, 1.3 * sc), rgb, 0.25); }   // reflet sur les rails
+    }
   });
 }
 function sfxHorn() {
@@ -1713,8 +2436,8 @@ function sfxHorn() {
   });
 }
 
-const TRAF_REF = 60;   // voyageurs « normaux » par quai et par unité d'affluence
-const platCap = st => Math.min(110, Math.round(st.aff * 60 + 15));
+const TRAF_REF = 100;   // voyageurs « normaux » par quai et par unité d affluence (relevé avec les quais plus garnis)
+const platCap = st => FIRE() ? Math.min(300, Math.round(st.aff * 160 + 50)) : Math.min(170, Math.round(st.aff * 95 + 25));
 const waitingHere = () => S.phase !== 'drive' && S.mode === 'running' ? S.mp.filter(m => m.st === 'walk').length : 0;
 function traffic() {
   // saturation de toute la ligne : les quais déjà desservis comptent comme dégagés,
@@ -1725,10 +2448,53 @@ function traffic() {
   return ref ? w / ref : 0;
 }
 const trafState = t => t < 0.4 ? ['FLUIDE', '#7dff8a'] : t < 0.7 ? ['DENSE', '#ffd75e'] : t < 0.9 ? ['SATURÉ', '#ffb35e'] : ['CRITIQUE', '#ff4a3a'];
+// ---------- Abri (mode feu) : décompte des voyageurs à la descente, puis la note ----------
+const unloadDur = n => Math.max(2.5, Math.min(7, n / 45));          // durée du décompte (s)
+const fireLostNow = () => S.lost + STATIONS.reduce((a, st, i) => a + (i < STATIONS.length - 1 && !st.burnt && !st.zombie ? st.people.length : 0), 0);
+const fireNote = (sv, lo) => sv + lo ? Math.round(20 * Math.min(1, 1.8 * sv / (sv + lo))) : 0;   // 55 % de sauvés = 20/20
+const NOTE_LBL = n => n >= 20 ? ['HÉROS DU DERNIER MÉTRO', '#ffd75e'] : n >= 16 ? ['Mention très bien', '#7dff8a'] : n >= 12 ? ['Mention bien', '#b6ff7a'] :
+  n >= 10 ? ['Passable', '#ffd75e'] : n >= 6 ? ['Insuffisant', '#ff9a5b'] : ['Catastrophe', '#ff4a3a'];
+function updateUnload(dt) {
+  const u = S.unload; if (!u || S.over) return;
+  if (u.done) { u.dt += dt; return; }
+  if (S.doors <= 0.6) return;                 // on attend l'ouverture des portes
+  u.t += dt;
+  const target = Math.min(u.tot, Math.floor(u.t * u.rate));
+  while (u.n < target) {
+    u.n++; S.load = Math.max(0, S.load - 1); S.saved = u.n; S.score += 10; S.out++;
+    const c = S.cars.indexOf(Math.max(...S.cars)); S.cars[c] = Math.max(0, S.cars[c] - 1);
+  }
+  const tk = Math.floor(u.t * 18); if (u.n < u.tot && tk !== u.tick) { u.tick = tk; beep(1200 + 600 * u.n / Math.max(1, u.tot), 0.025, 'square', 0.02); }
+  if (u.n >= u.tot && u.t > 1.2) {
+    u.done = true; S.load = 0; S.cars = S.cars.map(() => 0); S.saved = u.tot;
+    u.lost = fireLostNow(); u.note = fireNote(u.tot, u.lost); S.endT = 7; S.msgs = []; S.mp = S.mp.filter(m => m.st !== 'walk');
+    const good = u.note >= 12;
+    (good ? [523, 659, 784, 1047, 1319] : [392, 330, 262]).forEach((f, i) => beep(f, good ? 0.18 : 0.3, 'square', 0.06, 0.5 + i * (good ? 0.1 : 0.2)));
+  }
+}
+function drawUnload() {
+  const u = S.unload; if (!u || S.mode !== 'running' || S.over) return;
+  const x = 138, w = W - 8 - x, y = 8, h = u.done ? 96 : 50;
+  g.fillStyle = 'rgba(6,8,14,0.92)'; g.fillRect(x, y, w, h);
+  g.fillStyle = '#7dff8a'; g.fillRect(x, y, w, 2); g.fillRect(x, y + h - 2, w, 2);
+  txt('ABRI ATTEINT · DÉCOMPTE DES VOYAGEURS', x + w / 2, y + 12, 12, '#7dff8a', 'center', 'VT323', w - 12);
+  pixText(`${u.n} / ${u.tot}`, x + w / 2, y + 30, 10, u.done ? '#ffffff' : '#9fe0ff');
+  const bw = w - 24, k = u.tot ? u.n / u.tot : 1;
+  g.fillStyle = '#1b2232'; g.fillRect(x + 12, y + 37, bw, 5); g.fillStyle = '#7dff8a'; g.fillRect(x + 12, y + 37, Math.round(bw * k), 5);
+  txt(u.done ? 'Tout le monde est descendu' : 'Les voyageurs descendent…', x + w / 2, y + 48, 11, '#8fa0b8', 'center');
+  if (!u.done) return;
+  const ratio = u.tot + u.lost ? Math.round(100 * u.tot / (u.tot + u.lost)) : 0;
+  txt(`✔ ${u.tot} sauvés   † ${u.lost} perdus   (${ratio} %)`, x + w / 2, y + 60, 11, '#ffd0a8', 'center', 'VT323', w - 12);
+  if (u.dt < 0.5) return;
+  const [lbl, col] = NOTE_LBL(u.note), pop = Math.min(1, (u.dt - 0.5) * 4);
+  txt('NOTE', x + 46, y + 80, 12, '#8fa0b8', 'center');
+  pixText(`${u.note}/20`, x + w / 2, y + 82, Math.round(8 + 6 * pop), col);
+  txt(lbl, x + w / 2, y + 92, 11, col, 'center', 'VT323', w - 12);
+}
 function finish() {
   S.mode = 'end';
   const avg = S.trafT ? S.trafSum / S.trafT : 0;
-  S.trafAvg = avg; S.trafBonus = Math.max(0, Math.round((1 - avg) * 300)); S.score += S.trafBonus;
+  S.trafAvg = avg; S.trafBonus = FIRE() ? 0 : Math.max(0, Math.round((1 - avg) * 300)); S.score += S.trafBonus;
   if (avg < 0.3) mDone('fluide'); else mFail('fluide');
   ['retard0', 'clean', 'police'].forEach(mDone);
   S.missions.forEach(m => { if (m.state === 'pending') m.state = 'fail'; });
@@ -1736,11 +2502,14 @@ function finish() {
   if (S.score > BEST) { S.newRecord = true; BEST = S.score; saveBest(); }
   // médailles par catégorie
   const arr = STATIONS.filter((st, i) => i > 0 && st.res.stars), nA = arr.length;
-  const punct = nA ? arr.filter(st => st.res.stars.t).length / nA : 0;
+  const punct = FIRE() ? null : nA ? arr.filter(st => st.res.stars.t).length / nA : 0;
   const sw = S.swN ? Math.max(0, 1 - (S.swBad || 0) / S.swN) : null;
-  const vy = 0.5 * (S.paxOffer ? S.pax / S.paxOffer : 1) + 0.5 * secPct() / 100;
+  if (FIRE()) STATIONS.forEach((st, i) => { if (i < STATIONS.length - 1 && !st.burnt && !st.zombie && st.people.length) { st.res.lost = (st.res.lost || 0) + st.people.length; S.lost += st.people.length; st.people = []; } });   // quais abandonnés derrière nous
+  if (FIRE()) S.note = fireNote(S.saved, S.lost);
+  const vy = FIRE() ? (S.saved + S.lost ? Math.min(1, 1.8 * S.saved / (S.saved + S.lost)) : 0) :   // impossible de sauver tout le monde : 55 % vaut l'or
+    0.5 * (S.paxOffer ? S.pax / S.paxOffer : 1) + 0.5 * secPct() / 100;
   S.cat = [catLevel(punct), catLevel(sw), catLevel(vy)]; S.catR = [punct, sw, vy];
-  const id = LN().id, best = loadCat(id);
+  const id = modeId(LN().id), best = loadCat(id);
   S.catNew = S.cat.map((l, i) => l > best[i]);
   const nb = best.map((b, i) => Math.max(b, S.cat[i]));
   // classement des 5 meilleurs services de la ligne
@@ -1771,16 +2540,17 @@ function update(dt) {
   STATIONS.forEach((st, i) => {
     if (st.closed) return;                 // station fermée par le PCC : personne n'y entre
     const here = i === S.cur && S.phase !== 'drive';
-    st.acc += dt * st.aff * PERIODS[PER].accMul * LN().acc * (here ? 0.4 : 0.045);   // à quai, des voyageurs descendent sans cesse des escaliers   // flux entrant : l'embarquement doit pouvoir le dépasser
+    if (FIRE() && (st.burnt || (st.served && !here) || S.unload)) return;   // fuite : quai déjà quitté ou englouti
+    st.acc += dt * st.aff * PERIODS[PER].accMul * LN().acc * (FIRE() ? (here ? 1 : 0.13) : (here ? 0.8 : 0.07));   // à quai, des voyageurs descendent sans cesse des escaliers   // flux entrant : l'embarquement doit pouvoir le dépasser
     while (st.acc >= 1) {
       st.acc -= 1;
       if (here) spawnArrival(st);
-      else if (st.people.length < platCap(st)) st.people.push(mkPerson(st.pos - 68 + Math.random() * 70, 2.3 + Math.random() * 3.4));
+      else if (st.people.length < platCap(st)) st.people.push((st.zombie ? mkZombie : mkPerson)(st.pos - 68 + Math.random() * 70, 2.3 + Math.random() * 3.4));
     }
   });
   const tr = traffic(); S.trafSum += tr * dt; S.trafT += dt;
-  if (tr >= TRAF_MAX) gameOver('Ligne saturée', 'Le trafic a atteint 100 % : trop de voyageurs laissés sur les quais.');
-  if (tr >= 0.85 && !S.trafWarn) { S.trafWarn = true; msg('⚠ Trafic critique : la ligne va saturer ! Embarquez un maximum de voyageurs', '#ff4a3a', 5); }
+  if (tr >= TRAF_MAX && !FIRE()) gameOver('Ligne saturée', 'Le trafic a atteint 100 % : trop de voyageurs laissés sur les quais.');
+  if (tr >= 0.85 && !S.trafWarn && !FIRE()) { S.trafWarn = true; msg('⚠ Trafic critique : la ligne va saturer ! Embarquez un maximum de voyageurs', '#ff4a3a', 5); }
   if (tr < 0.8) S.trafWarn = false;
   S.trafShow += (tr - S.trafShow) * Math.min(1, dt * 3);
   S.trafDown = Math.max(0, S.trafDown - dt); if (tr < S.trafShow - 0.003) S.trafDown = 0.6;
@@ -1813,7 +2583,7 @@ function update(dt) {
   let a = 0;
   if (Z && (S.mg || S.rev)) { if (S.warnT <= 0) { msg(S.mg ? 'Terminez la manœuvre de l\'aiguille d\'abord' : 'Retour en marche arrière en cours…', '#ffb35e'); S.warnT = 2; } }
   else if (Z) {
-    if (S.phase === 'drive' && !S.ebrake) a += 2.4 - 0.8 * S.v / VMAX;   // traction : forte au démarrage, un peu moins à pleine vitesse
+    if (S.phase === 'drive' && !S.ebrake) a += (2.4 - 0.8 * S.v / VMAX) * tractionF();   // traction : forte au démarrage, un peu moins à pleine vitesse (fuite : alourdie par la charge)
     else if (S.warnT <= 0) { msg('Fermez d\'abord les portes !', '#ff6b5b'); S.warnT = 2; }
   }
   if (B) a -= BRAKE_MAX * S.brakeF;
@@ -1822,7 +2592,7 @@ function update(dt) {
   S.pos += S.v * dt;
   updateTuto(dt);
   updateEvents(dt);
-  updateSwitch(dt);
+  updateSwitch(dt); updateBends(dt); updateFire(dt);
   updateReverse(dt);
   updateManual(dt);
   updateLeader(dt);
@@ -1847,7 +2617,7 @@ function update(dt) {
   if (S.phase === 'drive' && sd !== null && S.entryDelta === null && stN && !stN.closed && S.pos >= stN.pos - PL) {
     S.entryDelta = sd;
     const [lab, col] = schedState(sd);
-    msg(`Entrée à quai : ${Math.abs(sd) <= 2 ? 'pile à l\'heure !' : lab.toLowerCase()}`, col, 2.5);
+    if (!FIRE()) msg(`Entrée à quai : ${Math.abs(sd) <= 2 ? 'pile à l\'heure !' : lab.toLowerCase()}`, col, 2.5);
   }
   // trace vitesse / distance de l'approche (un point tous les 50 cm)
   if (S.phase === 'drive' && S.next < STATIONS.length) {
@@ -1857,6 +2627,7 @@ function update(dt) {
       if (!last || last[0] - dm >= 0.5) S.trace.push([dm, S.v * 3.6]);
     }
   }
+  if (S.phase === 'drive') traceBend();
   // bips de proximité dans les 3 derniers mètres (son continu pile sur la marque)
   if (S.phase === 'drive' && S.next < STATIONS.length && S.v > 0.05) {
     const dm = STATIONS[S.next].pos - S.pos;
@@ -1888,13 +2659,15 @@ function update(dt) {
     else if (S.v === 0 && err < -5 && err > -45 && S.hintT <= 0) { msg('Avancez jusqu\'à la marque d\'arrêt', '#ffd75e'); S.hintT = 3; }
     else if (err > PE + 1) {
       S.cur = S.next; st.res.skipped = true; st.served = true;
-      pen(-100, `Station ${st.name} brûlée !`);
-      S.missed++;
-      if (S.missed >= MISS_MAX) gameOver(`${MISS_MAX} arrêts ratés`, `Station ${st.name} brûlée.`);
+      if (st.zombie) { S.score += 50; st.res.zok = true; msg(`☣ ${st.name} traversée sans arrêt : les zombies restent sur le quai (+50)`, '#9aff6a', 3.5); }
+      else if (FIRE()) msg(`${st.name} passée sans arrêt : ${st.people.length} voyageurs restent sur le quai`, '#ff8a5b', 3.5);
+      else pen(-100, `Station ${st.name} brûlée !`);
+      if (!FIRE()) S.missed++;
+      if (S.missed >= MISS_MAX && !FIRE()) gameOver(`${MISS_MAX} arrêts ratés`, `Station ${st.name} brûlée.`);
       if (S.malaise && S.malaise.shown) { pen(-80, 'Malaise voyageur : arrêt obligatoire non respecté !'); S.malaise = null; }
       S.next++;
       if (S.next >= STATIONS.length) S.endT = 3;
-      else if (!S.over) { msg(`Station brûlée : arrêt raté ${S.missed} / ${MISS_MAX}`, '#ff6b5b', 3.5); startLeg(); }   // nouvelle interstation : l'horaire et la courbe repartent
+      else if (!S.over) { if (!FIRE()) msg(`Station brûlée : arrêt raté ${S.missed} / ${MISS_MAX}`, '#ff6b5b', 3.5); startLeg(); }   // nouvelle interstation : l'horaire et la courbe repartent
     }
   }
 
@@ -1911,14 +2684,17 @@ function update(dt) {
         cst.people = stayers.map(m => Object.assign(mkPerson(cst.pos - m.z, Math.min(5.8, m.x + 1.8)), lookOf(m)));
         const res = STATIONS[S.cur].res; res.left = left;
         if (STATIONS[S.cur].name === busiestStation()) { if (left === 0) mDone('vide'); else mFail('vide'); }
-        if (left > 0) S.score -= 5 * left;
+        if (left > 0 && !FIRE()) S.score -= 5 * left;   // fuite : ceux qui restent sont comptés comme perdus, pas en points
         res.stars = Object.assign({ p: null, t: null }, res.stars || {}, { v: left === 0 });
-        S.recap = { name: STATIONS[S.cur].name, out: res.out || 0, board: res.board, left, pts: 5 * res.board - 5 * left + S.legPen, pen: S.legPen, stars: res.stars, t: 0 };
+        S.recap = { name: STATIONS[S.cur].name, out: res.out || 0, board: res.board, left, pts: 5 * res.board - (FIRE() ? 0 : 5 * left) + S.legPen, pen: S.legPen, stars: res.stars, t: 0 };
         S.legPen = 0;
         S.pops = [];
-        S.doors = 0; S.phase = 'drive'; S.mp = []; sfxDoor(); startLeg();
+        if (S.next < STATIONS.length && !FIRE()) vialBilan();
+        S.carShut = null;
+        S.doors = 0; S.phase = 'drive'; S.mp = []; S.departT = S.t; sfxDoor(); startLeg();
         if (S.next < STATIONS.length) { const nn = STATIONS[S.next].name; setTimeout(() => { if (S.mode === 'running' && !S.over) { chime(); setTimeout(() => speak(`Prochaine station : ${nn.replace(/ – /g, ', ')}.`, { vol: 0.6 }), 800); } }, 2500); }
-        if (S.next < STATIONS.length) {
+        if (S.next < STATIONS.length && FIRE()) msg(`${res.board} montés${left ? ', ' + left + ' laissés sur le quai' : ''} · vague à ${Math.round(fireGap())} m`, left ? '#ffd75e' : '#7dff8a', 3.5);
+        else if (S.next < STATIONS.length) {
           const fc = S.clock + playerFastestLeg(STATIONS[S.next].pos - cst.pos) - STATIONS[S.next].arr;
           const tm = fc > 0.5 ? `départ avec +${Math.ceil(fc)} s` : 'départ à l\'heure';
           msg(`${res.board} montés${left ? ', ' + left + ' laissés' : ''} · ${tm}`, fc > 0.5 ? '#ffb35e' : left ? '#ffd75e' : '#7dff8a', 3.5);
@@ -1933,19 +2709,21 @@ function update(dt) {
   if (S.phase === 'dwell' && S.endT < 0 && S.next < STATIONS.length && S.load < CAP) {
     const st = STATIONS[S.cur];
     S.waveT -= dt;
-    if (S.clock > st.dep - 10 && S.waveT <= 0 && S.waves < 4) {
-      const z0 = pick([-2, 37, 79]), n = Math.round((4 + Math.random() * 5) * Math.min(1.6, 0.6 + st.aff * 0.4));
+    if ((FIRE() ? S.clock > st.arr + 3 : S.clock > st.dep - 10) && S.waveT <= 0 && S.waves < (FIRE() ? 9 : 4)) {
+      const z0 = pick([-2, 37, 79]), n = Math.round((4 + Math.random() * 5) * Math.min(1.6, 0.6 + st.aff * 0.4) * (FIRE() ? 2.5 : 1.6));
       for (let i = 0; i < n; i++) {
         const z = z0 + Math.random() * 3, door = DOORS.reduce((a, b) => Math.abs(b - z) < Math.abs(a - z) ? b : a);
-        S.mp.push(Object.assign(mkPerson(0, 0), { kind: 'adult', kid: null, slow: 1, acc2: null, st: 'walk', door, z, x: 4 + Math.random() * 1.2, side: Math.random() < 0.5 ? -1 : 1,
+        S.mp.push(Object.assign(mkPerson(0, 0), { kind: 'adult', kid: null, slow: 1, acc2: null }, st.zombie ? ZOMBIE_LOOK() : {}, { st: 'walk', door, z, x: 4 + Math.random() * 1.2, side: Math.random() < 0.5 ? -1 : 1,
           sp: 2.6 + Math.random() * 0.9, delay: Math.random() * 1.2, runner: true, walk: 0, fresh: true }));
         st.res.offer++; S.paxOffer++;
       }
-      S.waves++; S.waveT = 5 + Math.random() * 4;
-      if (S.waves === 1) msg(`${n} voyageurs arrivent en courant : les attendre ?`, '#9fe0ff', 2.5);
+      S.waves++; S.waveT = FIRE() ? 3.5 + Math.random() * 3 : 5 + Math.random() * 4;
+      if (S.waves === 1 && st.zombie) msg('☣ Encore des zombies ! Fermez les portes !', '#9aff6a', 2.5);
+      else if (S.waves === 1) msg(FIRE() ? `${n} voyageurs dévalent l'escalier : les attendre ? (vague à ${Math.round(fireGap())} m)` : `${n} voyageurs arrivent en courant : les attendre ?`, '#9fe0ff', 2.5);
     }
   }
 
+  updateUnload(dt);
   if (S.endT > 0) { S.endT -= dt; if (S.endT <= 0) finish(); }
 
   // incidents
@@ -2000,7 +2778,8 @@ function update(dt) {
 // ---------- Rendu 3D (pseudo-perspective par tranches) ----------
 const F = 130, CX = 192, NEAR = 0.8, DMAX = 170, STEP = 2;
 let CY = 72;
-const P = (x, y, d) => [CX + x * F / d, CY - y * F / d];
+let XOFF = 0;   // décalage latéral de la vue (la rame qui s'engage sur la branche déviée)
+const P = (x, y, d) => [CX + (x + XOFF + curvAt(d)) * F / d, CY - y * F / d];
 // ombrage : 24 paliers (au lieu de 8) et brume colorée au loin plutôt qu'un noir pur
 let FOG = [6, 7, 12];
 function sh(c, f) {
@@ -2099,6 +2878,9 @@ function tunnelLight(pm, d) {
 }
 
 function tunnelSlice(p0, d0, d1) {
+  const sw = S.sw;
+  if (sw && sw.kind === 'fork' && p0 < zBof(sw) && p0 + STEP > sw.pos - chLead(sw)) return chamberSlice(sw, p0, d0, d1);
+  const gh = swGhost(); if (gh && p0 < zBof(gh) && p0 + STEP > gh.pos - chLead(gh)) return chamberSlice(gh, p0, d0, d1);
   const yf = -2, full = p0 - S.pos >= NEAR;
   const { f, w } = tunnelLight(p0 + 1, d0);
   const detail = d0 < 55;
@@ -2645,7 +3427,7 @@ function drawPerson(sx, sy, sc, pp, walk = 0) {
     const ey = headY + (onPhone ? headR * 0.3 : headR * 0.05) + (pp.hat === 'hood' ? headR * 0.1 : 0);
     const er = Math.max(0.6 / RES, headR * 0.11);
     const blink = Math.sin(t * 0.9) > 0.985;
-    const eyeC = pp.hat === 'hood' ? 'rgba(255,255,255,0.75)' : '#1a1410';
+    const eyeC = pp.zombie ? '#ff3a2a' : pp.hat === 'hood' ? 'rgba(255,255,255,0.75)' : '#1a1410';
     if (!blink) { circ(headX - headR * 0.35 + look * headR, ey, er, eyeC); circ(headX + headR * 0.35 + look * headR, ey, er, eyeC); }
     if (pp.hat !== 'hood' && !pp.beard) { g.fillStyle = skinD; g.fillRect(headX - headR * 0.18 + look * headR * 0.6, headY + headR * 0.5, headR * 0.36, Math.max(0.5 / RES, headR * 0.07)); }
     if (pp.glasses && pp.hat !== 'hood') {
@@ -2773,7 +3555,7 @@ function collectSprites() {
     }});
     const si = STATIONS.indexOf(s);
     // panneaux de distance avant la marque d'arrêt
-    [[50, '50'], [25, '25'], [10, '10']].forEach(([off, lab]) => {
+    if (!FIRE()) [[50, '50'], [25, '25'], [10, '10']].forEach(([off, lab]) => {   // fuite : pas de panneaux chiffrés (on les prenait pour des limitations)
       const d = s.pos - off - S.pos;
       if (d > NEAR + 0.5 && d < DMAX) list.push({ d, draw: d => {
         const [x0, y0] = P(-2.5, 1.0, d), [x1, y1] = P(-1.9, 0.4, d);
@@ -2846,10 +3628,12 @@ function collectSprites() {
       } });
     });
   });
+  bendSprites(list);
   return list.sort((a, b) => b.d - a.d);
 }
 
 function drawScene() {
+  SIG_FLARES.length = 0;
   g.save();
   g.beginPath(); g.rect(0, 0, W, VIEW_H); g.clip();
   g.fillStyle = '#050507'; g.fillRect(0, 0, W, VIEW_H);
@@ -2868,19 +3652,30 @@ function drawScene() {
     const inZone = sp - S.pos <= bd + 0.5;
     BZ = { from: sp - bd, to: sp, col: inZone ? [230, 70, 50] : [230, 140, 40], inZone };
   }
+  buildCurv();
   const sprites = collectSprites(); let si = 0;
+  const SV = swView(), GHw = SV && swGhost(), GH = GHw && { zB: zBof(GHw), off: GHw.set === 'G' ? BR : 0 };
+  const xo = sp => !SV ? 0 : sp.gh ? SV.b : sp.cs || sp.d + S.pos < SV.zB - 0.01 ? SV.a : GH && sp.d + S.pos >= GH.zB - 0.01 ? SV.b + GH.off : SV.b;
   const pTop = Math.floor((S.pos + DMAX) / STEP) * STEP;
   for (let p1 = pTop; p1 - S.pos > NEAR; p1 -= STEP) {
     const p0 = p1 - STEP;
     const d1 = p1 - S.pos + 0.12, d0 = Math.max(p0 - S.pos, NEAR);
     const s = stationAt((p0 + p1) / 2);
+    XOFF = SV ? (p0 >= SV.zB - 0.01 ? (GH && p0 >= GH.zB - 0.01 ? SV.b + GH.off : SV.b) : SV.a) : 0;
     if (s) { FOG = FOG_ST; stationSlice(s, p0, d0, d1, Math.max(0.35, 1 - d0 / 260)); }
     else { FOG = FOG_TUN; tunnelSlice(p0, d0, d1, Math.max(0.06, 1 - d0 / 150)); }
-    while (si < sprites.length && sprites[si].d >= d0) { sprites[si].draw(sprites[si].d); si++; }
+    while (si < sprites.length && sprites[si].d >= d0) { XOFF = xo(sprites[si]); sprites[si].draw(sprites[si].d); si++; }
   }
-  while (si < sprites.length) { sprites[si].draw(sprites[si].d); si++; }
+  while (si < sprites.length) { XOFF = xo(sprites[si]); sprites[si].draw(sprites[si].d); si++; }
+  XOFF = 0;
   FOG = FOG_TUN;
   drawHeadlights();
+  // feux des signaux par-dessus le halo des phares
+  SIG_FLARES.forEach(([x, y, r, rgb, col]) => {
+    glow(x, y, Math.max(7, r * 5), rgb, 0.55);
+    g.fillStyle = col; g.beginPath(); g.arc(x, y, Math.max(1.1, r), 0, 7); g.fill();
+  });
+  SIG_FLARES.length = 0;
   if (S.blackout && S.mode === 'running') {
     const flick = S.blackT < 1.4 ? (Math.random() < 0.55 ? 1 : 0.15) : 1;
     const dk = g.createRadialGradient(CX, CY + 46, 18, CX, CY + 30, 210);
@@ -2949,7 +3744,7 @@ function drawCCTV() {
       g.fillStyle = frame; g.fillRect(dx0, ty + 2, dx1 - dx0, by - ty - 1);
       const lx0 = Math.round(X(dz - 0.65)), lx1 = Math.round(X(dz + 0.65));
       g.fillStyle = '#5f7f9f'; g.fillRect(lx0, ty + 3, lx1 - lx0, by - ty - 3);
-      const o = S.doors * 0.62;
+      const o = carShut(car) ? 0 : S.doors * 0.62;
       if (o > 0.01) {
         const ox0 = Math.round(X(dz - o)), ox1 = Math.round(X(dz + o));
         g.fillStyle = '#f2e2a8'; g.fillRect(ox0, ty + 3, Math.max(1, ox1 - ox0), by - ty - 3);
@@ -2967,6 +3762,16 @@ function drawCCTV() {
         g.fillStyle = 'rgba(40,30,30,0.75)'; g.fillRect(hx - 1, ty + 7, 3, 3); g.fillRect(hx - 2, ty + 10, 5, by - ty - 11);
       }
     });
+    if (S.next < STATIONS.length) {   // remplissage, directement sur la voiture filmée : le niveau monte dans la caisse
+      const fire = FIRE(), f = fire ? carFill(car) : vialF(car), [va, vb] = VIAL(), st = fire ? 'low' : vialState(car), Hb = by - ty, Yv = v => by - Hb * Math.min(1, v / (fire ? 1 : OVF));
+      const col = fire ? (f > 0.75 ? '255,140,40' : f > 0.45 ? '255,210,80' : '74,168,255') : st === 'ok' ? '61,255,106' : st === 'over' ? '255,70,50' : '74,168,255';
+      g.fillStyle = `rgba(${col},${st === 'over' && flash ? 0.6 : 0.42})`; g.fillRect(sx, Yv(f), w, by - Yv(f));
+      g.fillStyle = `rgb(${col})`; g.fillRect(sx, Yv(f) - 0.4, w, 0.8);                                   // surface
+      if (!fire) {
+        g.fillStyle = 'rgba(61,255,106,0.9)'; for (let xx = sx; xx < sx + w; xx += 3) { g.fillRect(xx, Yv(va) - 0.25, 1.6, 0.5); g.fillRect(xx, Yv(vb) - 0.25, 1.6, 0.5); }   // zone verte
+        g.fillStyle = 'rgba(255,60,40,0.95)'; g.fillRect(sx, Yv(1) - 0.3, w, 0.6);                           // 100 %
+      }
+    }
     // quai
     g.fillStyle = '#8a8589'; g.fillRect(sx, by, w, h - (by - sy));
     g.fillStyle = '#e8dca0'; g.fillRect(sx, by, w, 3);
@@ -2977,6 +3782,17 @@ function drawCCTV() {
       .sort((a, b) => a.x - b.x)
       .forEach(m => {
         const k = vpm * (1 + 0.07 * m.x);
+        if ((m.st === 'door' && !m.holder && !m.fight) || m.st === 'inside') {
+          // montée : il franchit le seuil, monte la marche et s'enfonce dans la voiture (dessiné dans l'encadrement de porte)
+          const p = m.st === 'door' ? 0.55 * Math.max(0, Math.min(1, 1 - m.t / 0.3)) : 0.55 + 0.45 * Math.max(0, Math.min(1, 1 - m.t / 0.4));
+          const o = Math.max(0.3, S.doors * 0.62), zz = m.z + (m.door - m.z) * Math.min(1, p * 2);
+          g.save();
+          if (p > 0.2) { g.beginPath(); g.rect(X(m.door - o), ty + 3, X(m.door + o) - X(m.door - o), by - ty + 4); g.clip(); }
+          g.globalAlpha = p > 0.55 ? 1 - (p - 0.55) / 0.45 * 0.85 : 1;
+          drawPerson(X(zz), by + 2 + 0.25 * 5 - p * 5, k * (1 - 0.18 * p), m, m.walk);
+          g.globalAlpha = 1; g.restore();
+          return;
+        }
         drawPerson(X(m.z), by + 2 + m.x * 5, k, m, m.walk);
         if (m.halt) { g.fillStyle = '#ff6b5b'; g.fillRect(Math.round(X(m.z)) - 1, Math.round(by + 2 + m.x * 5 - k * m.h) - 5, 3, 3); }
       });
@@ -2998,9 +3814,14 @@ function drawCCTV() {
       txt(`${Math.ceil(S.medicT)} s`, SX + CAM_W - 4, SY + CAM_H - 5, 10, '#d42a2a', 'right');
     }
     const cf = Math.min(1, S.cars[car] / CAR_CAP);
-    g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(SX + 44, SY + 2, 44, 6);
-    g.fillStyle = cf >= 1 ? '#ff4a3a' : cf > 0.85 ? '#ffb35e' : cf > 0.6 ? '#ffd75e' : '#7dff8a';
-    g.fillRect(SX + 45, SY + 3, Math.round(42 * cf), 4);
+    if (S.next < STATIONS.length) {   // gros pourcentage au centre de la voiture
+      const fire = FIRE(), fv = carFill(car), st = fire ? 'low' : vialState(car), cy = SY + 21;
+      const col = fire ? (fv > 0.75 ? '#ffa04a' : fv > 0.45 ? '#ffd75e' : '#9fd4ff') : st === 'ok' ? '#3dff6a' : st === 'over' ? '#ff5a3a' : '#9fd4ff';
+      g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(SX + CAM_W / 2 - 24, cy - 11, 48, 15);
+      txt(fire ? `${S.cars[car]}` : `${Math.round(vialF(car) * 100)} %`, SX + CAM_W / 2, cy + 1, 16, col, 'center');   // fuite : le nombre de voyageurs à bord
+      if (carShut(car)) { g.fillStyle = 'rgba(160,20,20,0.92)'; g.fillRect(SX + CAM_W / 2 - 24, cy + 5, 48, 10); txt('🔒 FERMÉE', SX + CAM_W / 2, cy + 13, 10, '#ffffff', 'center'); }
+      else if (st === 'ok') { g.fillStyle = 'rgba(20,90,40,0.9)'; g.fillRect(SX + CAM_W / 2 - 24, cy + 5, 48, 10); txt(`DANS LE VERT · ${car + 1}`, SX + CAM_W / 2, cy + 13, 9, '#ffffff', 'center', 'VT323', 46); }
+    }
     if (S.suspects.some(x => x.car === car)) {
       g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(SX + 90, SY + 1, 12, 9); drawSkull(SX + 96, SY + 9, 1);
     }
@@ -3142,7 +3963,7 @@ function drawConsoleWear(C0) {
   }
   // rebord en caoutchouc écaillé
   for (let i = 0; i < 18; i++) { const x = hsh(i, 21) * W; g.fillStyle = 'rgba(80,80,85,0.5)'; g.fillRect(x, C0 + 0.5, 1 + hsh(i, 22) * 4, 1.2); }
-  // étiquette jaunie collée au ruban adhésif, près de la radio
+  // étiquette jaunie collée au ruban adhésif, au bord du pupitre
   g.save(); g.translate(352, bot - 16); g.rotate(-0.06);
   g.fillStyle = 'rgba(220,210,170,0.85)'; g.fillRect(0, 0, 26, 7);
   g.fillStyle = 'rgba(255,255,240,0.25)'; g.fillRect(-2, -1, 6, 3); g.fillRect(22, 5, 6, 3);
@@ -3197,22 +4018,24 @@ function drawCab() {
   }
   const mark = (v, c) => { const a = ang(v); g.strokeStyle = c; g.lineWidth = 1.4; g.beginPath(); g.moveTo(gx0 + Math.cos(a) * (R - 4.5), gy0 + Math.sin(a) * (R - 4.5)); g.lineTo(gx0 + Math.cos(a) * (R + 1.4), gy0 + Math.sin(a) * (R + 1.4)); g.stroke(); };
   if (running && S.phase === 'drive' && S.vperm < VMAX) mark(S.vperm * 3.6, '#4fc8ff');
-  if (S.limit) { mark(S.limit, '#ffb35e'); mark(S.limit + DERAIL, '#d42a2a'); }
+  const bA = running ? activeBend() : null, bLim = bA && (!S.limit || bA.lim < S.limit) ? bA.lim : 0;
+  if (bLim) { mark(bLim, '#ffb35e'); mark(bLim + BEND_TOL, '#d42a2a'); }
+  else if (S.limit) { mark(S.limit, '#ffb35e'); mark(S.limit + DERAIL, '#d42a2a'); }
   sans(String(kmh), gx0, gy0 + 8.5, 5.5, '#ffd75e', 'center', 0, true);
   const na = ang(S.v * 3.6);
   g.strokeStyle = '#ff7a2a'; g.lineWidth = 1.2; g.lineCap = 'round';
   g.beginPath(); g.moveTo(gx0 - Math.cos(na) * 2.5, gy0 - Math.sin(na) * 2.5); g.lineTo(gx0 + Math.cos(na) * (R - 2), gy0 + Math.sin(na) * (R - 2)); g.stroke(); g.lineCap = 'butt';
   g.fillStyle = '#3a3e48'; g.beginPath(); g.arc(gx0, gy0, 1.8, 0, 7); g.fill();
   g.fillStyle = 'rgba(255,255,255,0.07)'; g.beginPath(); g.ellipse(gx0 - 3, gy0 - 5, 8, 4, -0.5, 0, 7); g.fill();   // reflet du verre
-  if (S.limit) {   // panneau de limitation (travaux)
-    const over = kmh > S.limit + 1;
+  if (S.limit || bLim) {   // panneau de limitation (travaux ou virage)
+    const LIM = bLim || S.limit, over = kmh > LIM + 1;
     g.fillStyle = '#ffffff'; g.beginPath(); g.arc(gx0 + 19, IY + 5, 5, 0, 7); g.fill();
     g.strokeStyle = '#d42a2a'; g.lineWidth = 1.2; g.beginPath(); g.arc(gx0 + 19, IY + 5, 4.4, 0, 7); g.stroke();
-    sans(String(S.limit), gx0 + 19, IY + 7, 4.5, over && Math.floor(S.t * 6) % 2 ? '#d42a2a' : '#111', 'center', 0, true);
+    sans(String(LIM), gx0 + 19, IY + 7, 4.5, over && Math.floor(S.t * 6) % 2 ? '#d42a2a' : '#111', 'center', 0, true);
   }
 
   // écran de bord : dalle anthracite faiblement rétroéclairée, texte ambre et blanc cassé
-  const sx0 = 62, sw = 138, AMB = '#ffb547', OFF = '#e6dfcc', DIM = '#9c947e';
+  const sx0 = 62, sw = 100, AMB = '#ffb547', OFF = '#e6dfcc', DIM = '#9c947e';
   // cadre épais biseauté (clair en haut à gauche, sombre en bas à droite) et deux vis
   const bx0 = sx0 - 5, by0 = IY - 3, bw = sw + 10, bh = IH + 6;
   const bz = g.createLinearGradient(bx0, by0, bx0 + bw * 0.3, by0 + bh); bz.addColorStop(0, '#4a4e57'); bz.addColorStop(0.5, '#2c3038'); bz.addColorStop(1, '#16181d');
@@ -3232,28 +4055,31 @@ function drawCab() {
   if (atStation) {
     // ligne 1 : quand partir
     const st0 = STATIONS[S.cur];
-    if (S.next < STATIONS.length) {
+    if (S.next < STATIONS.length && S.fire) {
+      const gap = fireGap(), bl = Math.floor(S.t * 4) % 2;
+      sans(gap < 80 ? 'PARTEZ !' : `feu ${Math.round(gap)} m`, sx0 + sw - 4, IY + 11, 6.5, gap < 80 ? (bl ? '#ffffff' : '#ff6b3a') : fireCol(gap), 'right', sw - 44, true);
+    } else if (S.next < STATIONS.length) {
       const toDep = Math.ceil(st0.dep - S.clock), fc = departForecast(), bl = Math.floor(S.t * 4) % 2;
       const [l, c] = toDep > 0 ? [`départ dans ${toDep} s`, '#7dff8a'] : fc <= 0 ? [`partez ! marge ${Math.max(0, Math.floor(-fc))} s`, bl ? OFF : AMB] : [`retard prévu +${Math.ceil(fc)} s`, bl ? '#ff8a7a' : '#ffc0b8'];
-      sans(l, sx0 + sw - 4, IY + 11, 6.5, c, 'right', 90, true);
+      sans(l, sx0 + sw - 4, IY + 11, 6.5, c, 'right', sw - 44, true);
     } else sans('terminus', sx0 + sw - 4, IY + 11, 6.5, DIM, 'right');
     // ligne 2 : remplissage de la rame (5 voitures)
     const ratio = S.load / CAP, full = S.load >= CAP;
     sans('RAME', sx0 + 5, IY + 23.5, 5.5, DIM);
     for (let c = 0; c < 5; c++) {
-      const fill = Math.min(1, S.cars[c] / CAR_CAP), bx = sx0 + 24 + c * 11;
-      g.fillStyle = '#1a1f24'; g.fillRect(bx, IY + 16, 9, 9);
-      g.fillStyle = fill >= 1 ? '#ff4a3a' : fill > 0.85 ? '#ffb35e' : fill > 0.6 ? '#ffd75e' : '#7dff8a'; g.fillRect(bx, IY + 16 + 9 * (1 - fill), 9, 9 * fill);
+      const fill = Math.min(1, carFill(c)), bx = sx0 + 22 + c * 10;
+      g.fillStyle = '#1a1f24'; g.fillRect(bx, IY + 16, 8, 9);
+      g.fillStyle = fill >= 1 ? '#ff4a3a' : fill > 0.85 ? '#ffb35e' : fill > 0.6 ? '#ffd75e' : '#7dff8a'; g.fillRect(bx, IY + 16 + 9 * (1 - fill), 8, 9 * fill);
     }
     sans(full ? 'PLEINE' : `${Math.round(ratio * 100)} %`, sx0 + sw - 4, IY + 23.5, 6, full ? '#ff8a7a' : OFF, 'right');
   } else {
-  if (S.missed > 0) sans(`arrêts ratés ${S.missed}/${MISS_MAX}`, sx0 + sw - 4, IY + 10, 5.5, S.missed >= MISS_MAX - 1 ? '#ff8a7a' : '#ffc27a', 'right');
+  if (S.fire) sans(`🔥 ${Math.max(0, Math.round(fireGap()))} m`, sx0 + sw - 4, IY + 10, 6, fireCol(fireGap()), 'right', 0, true);
+  else if (S.missed > 0) sans(`ratés ${S.missed}/${MISS_MAX}`, sx0 + sw - 4, IY + 10, 5.5, S.missed >= MISS_MAX - 1 ? '#ff8a7a' : '#ffc27a', 'right');
   if (S.next < STATIONS.length) {
     const n = STATIONS[S.next], Ln = LN();
     g.fillStyle = Ln.col; g.beginPath(); g.arc(sx0 + 9, IY + 21, 4.6, 0, 7); g.fill();
     sans(Ln.num, sx0 + 9, IY + 23.2, Ln.num.length > 1 ? 4.5 : 6, Ln.fg, 'center', 0, true);
-    sans(n.name, sx0 + 17, IY + 23.5, 7, AMB, 'left', sw - 58, true);
-    sans('arr. ' + fmt(n.arr), sx0 + sw - 4, IY + 23.5, 6.5, S.entryDelta !== null ? DIM : schedState(S.schedShow)[1], 'right');
+    sans((n.zombie ? '☣ ' : '') + n.name, sx0 + 17, IY + 23.5, 7, n.zombie ? '#9aff6a' : AMB, 'left', sw - 22, true);
   } else sans('Terminus', sx0 + 17, IY + 23.5, 7, AMB, 'left', 0, true);
   }
 
@@ -3265,7 +4091,7 @@ function drawCab() {
   g.restore();
   for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(220,215,200,${0.08 + 0.12 * hsh(i, 47)})`; g.fillRect(sx0 + hsh(i, 45) * sw, IY + 1 + hsh(i, 46) * (IH - 2), 0.5, 0.5); }
   // traces de doigts sur l'écran de bord, poussière sur le verre du compteur
-  for (const [x, y, r] of [[sx0 + 30, IY + 20, 5], [sx0 + 92, IY + 9, 4], [sx0 + 118, IY + 22, 6]]) {
+  for (const [x, y, r] of [[sx0 + 24, IY + 20, 5], [sx0 + 66, IY + 9, 4], [sx0 + 86, IY + 22, 6]]) {
     const fp = g.createRadialGradient(x, y, 0, x, y, r); fp.addColorStop(0, 'rgba(255,255,255,0.06)'); fp.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = fp; g.fillRect(x - r, y - r, r * 2, r * 2);
   }
@@ -3303,24 +4129,64 @@ function drawCab() {
       sans(key, x, y + 2.3, 6.5, active ? '#111' : '#7d8290', 'center', 0, true);
       sans(label, x, cy + 12, 4.4, active ? '#ffffff' : '#8a909c', 'center', 0, active);
     };
-    big(216, 'P', 'SONNERIE', '#ffd75e', step === 'P', false);
-    big(244, '⏎', busy ? 'ATTENDEZ' : 'FERMETURE', '#ff9a3a', step === '⏎' && !busy, busy);
-    big(272, 'Z', 'DÉPART', '#7dff8a', step === 'Z', false);
+    big(188, 'P', 'SONNERIE', '#ffd75e', step === 'P', false);
+    big(222, '⏎', busy ? 'ATTENDEZ' : 'FERMETURE', '#ff9a3a', step === '⏎' && !busy, busy);
+    big(256, 'Z', 'DÉPART', '#7dff8a', step === 'Z', false);
     // voyant PORTES : rouge ouvertes, orange en fermeture, vert verrouillées
     const dc = mute(S.doors <= 0 ? '#3dff6a' : S.phase === 'closing' || busy ? (blink ? '#ffb35e' : '#7a4a10') : '#ff3a2a', 0.25);
-    g.fillStyle = '#0a0b0e'; g.fillRect(285, cy - 9, 12, 12);
-    g.fillStyle = dc; g.fillRect(286.5, cy - 7.5, 9, 9);
-    glow(291, cy - 3, 9, [1, 3, 5].map(i => parseInt(dc.slice(i, i + 2), 16)).join(','), 0.3);
-    sans('PORTES', 291, cy + 12, 4.2, busy ? (blink ? '#ffb35e' : '#c08a4a') : '#8a909c', 'center', 0, busy);
+    g.fillStyle = '#0a0b0e'; g.fillRect(284, cy - 9, 12, 12);
+    g.fillStyle = dc; g.fillRect(285.5, cy - 7.5, 9, 9);
+    glow(290, cy - 3, 9, [1, 3, 5].map(i => parseInt(dc.slice(i, i + 2), 16)).join(','), 0.3);
+    sans('PORTES', 290, cy + 12, 4.2, busy ? (blink ? '#ffb35e' : '#c08a4a') : '#8a909c', 'center', 0, busy);
+  } else if (running && S.phase === 'drive' && S.sw && S.sw.kind === 'fork' && !S.sw.passed && !S.rev) {
+    // sélecteur d'itinéraire : schéma de la bifurcation et deux boutons ← / →
+    const w = S.sw, dp = Math.max(0, Math.round(w.pos - S.pos)), ok = w.tgt === w.want, moving = w.fixT > 0, lock = w.pos - S.pos < (w.lock || SW_LOCK);
+    const mx0 = 178, mw = 60, my0 = IY + 1, mh = IH - 2;
+    g.fillStyle = '#050608'; g.fillRect(mx0 - 1.5, my0 - 1.5, mw + 3, mh + 3);
+    const lg = g.createLinearGradient(0, my0, 0, my0 + mh); lg.addColorStop(0, '#0f151a'); lg.addColorStop(1, '#090c10');
+    g.fillStyle = lg; g.fillRect(mx0, my0, mw, mh);
+    sans('ITINÉRAIRE', mx0 + 2, my0 + 5, 3.6, DIM); sans(`${dp} m`, mx0 + mw - 2, my0 + 5, 4, OFF, 'right', 0, true);
+    // schéma : tronc commun, voie directe (tout droit) et voie déviée (à droite)
+    const fx = mx0 + 10, fy = my0 + 21, top = my0 + 8, bx = fx + 13;
+    const setCol = moving ? (blink ? '#ffd75e' : '#6a5a20') : '#f2efe6', offCol = '#3a404a';
+    const lineC = k => (moving ? w.tgt : w.set) === k ? setCol : offCol;
+    g.lineCap = 'round';
+    g.strokeStyle = setCol; g.lineWidth = 1.5; g.beginPath(); g.moveTo(fx, my0 + mh - 1); g.lineTo(fx, fy); g.stroke();
+    g.strokeStyle = lineC('D'); g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx, top); g.stroke();
+    g.strokeStyle = lineC('G'); g.beginPath(); g.moveTo(fx, fy); g.quadraticCurveTo(fx, fy - 6, bx, top + 5); g.lineTo(bx, top); g.stroke();
+    g.lineCap = 'butt';
+    // bout de chaque voie : flèche verte (demandée) ou barrière rouge (fin de voie)
+    for (const [k, ex] of [['D', fx], ['G', bx]]) {
+      if (k === w.want) { g.fillStyle = '#7dff8a'; g.beginPath(); g.moveTo(ex, top - 3.5); g.lineTo(ex - 2.4, top - 0.5); g.lineTo(ex + 2.4, top - 0.5); g.fill(); }
+      else { g.fillStyle = '#ff3a2a'; g.fillRect(ex - 3, top - 2.6, 6, 1.6); g.fillStyle = '#ffffff'; g.fillRect(ex - 1, top - 2.6, 1, 1.6); g.fillRect(ex + 1, top - 2.6, 1, 1.6); }
+    }
+    sans('PCC', mx0 + 29, my0 + 12, 3.6, DIM); sans(w.want === 'D' ? 'DIRECT' : FIRE() ? 'DÉVIÉ' : 'DÉVIÉ 30', mx0 + 29, my0 + 17, 4.6, '#7dff8a', 'left', mw - 30, true);
+    const [stT, stC] = moving ? ['EN MOUV.', '#ffd75e'] : lock ? ['VERROU', DIM] : ok ? ['OK', '#7dff8a'] : ['ERREUR !', blink ? '#ff6b5b' : '#7a2a26'];
+    sans(stT, mx0 + 29, my0 + 24.5, 4.2, stC, 'left', mw - 30, true);
+    // boutons
+    const rb = (x, k, glyph, label) => {
+      const sel = w.tgt === k, good = k === w.want, col = sel ? (good ? '#3dff6a' : '#ff3a2a') : null, y = cy - 3, r = 6.2;
+      g.fillStyle = '#0a0b0e'; g.beginPath(); g.arc(x, y, r + 1.2, 0, 7); g.fill();
+      const bg = g.createRadialGradient(x - 1.5, y - 1.5, 0.5, x, y, r);
+      bg.addColorStop(0, sel ? '#ffffff' : '#5a5f6a'); bg.addColorStop(0.45, sel ? mute(col, 0.2) : '#2e323b'); bg.addColorStop(1, sel ? mute(col, 0.2) : '#1d2027');
+      g.fillStyle = bg; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      if (sel) glow(x, y, 13, good ? '61,255,106' : '255,58,42', 0.35);
+      if (!ok && good && !lock && blink) { g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + 2.2, 0, 7); g.stroke(); }
+      sans(glyph, x, y + 2.2, 6, sel ? '#111' : '#9aa1ae', 'center', 0, true);
+      sans(label, x, cy + 12, 4.2, sel ? '#ffffff' : '#8a909c', 'center', 0, sel);
+    };
+    rb(260, 'D', '←', 'DIRECT'); rb(290, 'G', '→', 'DÉVIÉ');
   } else {
-  btn(214, 'PORTES', S.doors <= 0, '#3dff6a');
-  btn(238, 'SONN.', S.buzzT > 0, '#ffd75e');
-  btn(262, 'KLAXON', (S.hornT || 0) > 0, '#e6ecf5');
+  btn(190, 'PORTES', S.doors <= 0, '#3dff6a');
+  btn(222, 'SONN.', S.buzzT > 0, '#ffd75e');
+  if (!FIRE()) {   // fuite : ni klaxon ni veille
+  btn(254, 'KLAXON', (S.hornT || 0) > 0, '#e6ecf5');
   btn(286, 'VEILLE', S.vacAlert > 0 && blink, '#ff9a3a');
+  }
   }
 
   // manette de traction / freinage (visuelle : suit l'accélérateur et le frein)
-  const mx = 320, mt = IY + 2, mb = IY + IH - 2, mm = (mt + mb) / 2;
+  const mx = 336, mt = IY + 2, mb = IY + IH - 2, mm = (mt + mb) / 2;
   g.fillStyle = '#0a0b0e'; g.fillRect(mx - 2, mt, 4, mb - mt);                      // fente
   for (let i = -3; i <= 3; i++) { g.fillStyle = i === 0 ? '#cfd6e6' : '#5a5f6a'; g.fillRect(mx + 4, mm + i * 3.8 - 0.3, i === 0 ? 5 : 3, 0.6); }
   sans('T', mx + 12, mt + 4, 4.5, mute('#7dff8a', 0.5)); sans('F', mx + 12, mb, 4.5, mute('#ff8a7a', 0.5));
@@ -3331,11 +4197,6 @@ function drawCab() {
   g.fillStyle = kg; g.beginPath(); g.ellipse(mx, hy, 6, 3.6, 0, 0, 7); g.fill();
   g.fillStyle = lev < 0 ? mute('#3dff6a') : lev > 0 ? mute('#ff6b5b') : '#9aa1ae'; g.fillRect(mx - 2.5, hy - 0.5, 5, 1);
 
-  // radio (combiné) et voyants divers
-  g.fillStyle = '#0d0e12'; g.fillRect(346, IY + 3, 30, IH - 6);
-  g.fillStyle = '#1c1f26'; g.fillRect(348, IY + 5, 26, 10);
-  g.fillStyle = S.radio > 0 || (S.radioT > 84) ? mute('#3dff6a') : '#1e2a22'; g.fillRect(350, IY + 7, 22, 6);
-  sans('RADIO', 361, IY + 22, 4.5, '#9aa1ae', 'center');
   // éclairage de cabine : légère teinte chaude commune à toute la console
   const wl = g.createLinearGradient(0, C0, 0, H); wl.addColorStop(0, 'rgba(255,175,105,0.07)'); wl.addColorStop(1, 'rgba(255,160,90,0.025)');
   g.fillStyle = wl; g.fillRect(0, C0, W, H - C0);
@@ -3350,8 +4211,10 @@ function targetKmh(dist) { return Math.sqrt(2 * BRAKE_REF * Math.max(0, dist - 0
 // graphe distance (100 m → marque) / vitesse : zone verte = vitesse idéale pour s'arrêter pile, trace du conducteur
 const CURVE_D = 130, CURVE_V = 70;
 // point où il faut commencer à freiner pour la vitesse actuelle (là où elle croise la courbe idéale)
-const brakePoint = kmh => (kmh / 3.6) ** 2 / (2 * BRAKE_REF) + 0.2;
-function drawCurve(x, y, w, h, trace, band, nowDist, light = false) {
+const brakePoint = (kmh, vl = 0) => vl ? ((kmh / 3.6) ** 2 - (vl / 3.6) ** 2) / (2 * BRAKE_REF) : (kmh / 3.6) ** 2 / (2 * BRAKE_REF) + 0.2;
+// vl : vitesse limite visée au point 0 (0 = arrêt en station, sinon entrée de virage)
+function drawCurve(x, y, w, h, trace, band, nowDist, light = false, vl = 0) {
+  const T = vl ? d => Math.sqrt((vl / 3.6) ** 2 + 2 * BRAKE_REF * Math.max(0, d)) * 3.6 : targetKmh, eye = vl ? -99 : 10;
   const L = 13, B = 7;                                   // marges : graduations vitesse (gauche) et distance (bas)
   const gx = x + L, gw = w - L - 3, gy = y + 2, gh = h - B - 2;
   const X = d => gx + gw * (1 - Math.max(-3, Math.min(CURVE_D, d)) / CURVE_D) * 0.96;
@@ -3362,28 +4225,28 @@ function drawCurve(x, y, w, h, trace, band, nowDist, light = false) {
     g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(gx, Y(v), gw, 0.5);
     if (v % 20 === 0) txt(String(v), x + L - 2, Y(v) + 2.5, 7, '#7f8aa0', 'right');
   }
-  if (!light) for (const d of [100, 75, 50, 25, 10]) {
+  if (!light) for (const d of vl ? [100, 75, 50, 25] : [100, 75, 50, 25, 10]) {
     g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(X(d), gy, 0.5, gh);
     txt(String(d), X(d), y + h - 1, 7, '#7f8aa0', 'center');
   }
   g.fillStyle = '#d42a2a'; g.fillRect(X(0) - 0.5, gy, 1, gh);
-  txt('STOP', X(0), y + h - 1, 6, '#ff6b5b', 'center');
+  txt(vl ? 'VIRAGE' : 'STOP', X(0), y + h - 1, 6, '#ff6b5b', 'center');
   // zones : trop vite (rouge) au-dessus de la courbe, vitesse idéale (vert) juste en dessous
   if (band > 0) {
     g.globalAlpha = band;
-    const pts = []; for (let d = CURVE_D; d >= 0; d -= 1) pts.push(d);
+    const pts = []; for (let d = CURVE_D; d >= (vl ? -3 : 0); d -= 1) pts.push(d);
     g.fillStyle = 'rgba(150,44,34,0.45)'; g.beginPath(); g.moveTo(X(CURVE_D), gy);
-    pts.forEach(d => g.lineTo(X(d), Y(targetKmh(d)))); g.lineTo(X(0), gy); g.fill();
+    pts.forEach(d => g.lineTo(X(d), Y(T(d)))); g.lineTo(X(pts[pts.length - 1]), gy); g.fill();
     g.fillStyle = 'rgba(47,150,74,0.55)'; g.beginPath();
-    pts.forEach((d, i) => i ? g.lineTo(X(d), Y(targetKmh(d))) : g.moveTo(X(d), Y(targetKmh(d))));
-    for (let i = pts.length - 1; i >= 0; i--) g.lineTo(X(pts[i]), Y(Math.max(0, targetKmh(pts[i]) - 8)));
+    pts.forEach((d, i) => i ? g.lineTo(X(d), Y(T(d))) : g.moveTo(X(d), Y(T(d))));
+    for (let i = pts.length - 1; i >= 0; i--) g.lineTo(X(pts[i]), Y(Math.max(0, T(pts[i]) - 8)));
     g.fill();
     g.strokeStyle = '#7dff8a'; g.lineWidth = 0.8; g.beginPath();                       // bord de la courbe idéale
-    pts.forEach((d, i) => i ? g.lineTo(X(d), Y(targetKmh(d))) : g.moveTo(X(d), Y(targetKmh(d)))); g.stroke();
+    pts.forEach((d, i) => i ? g.lineTo(X(d), Y(T(d))) : g.moveTo(X(d), Y(T(d)))); g.stroke();
     // repère « freinez ici » pour la vitesse actuelle
     if (nowDist !== undefined && S.v > 1) {
-      const db = brakePoint(S.v * 3.6);
-      if (db > 10 && db < nowDist + 0.5) {
+      const db = brakePoint(S.v * 3.6, vl);
+      if (db > (vl ? 0 : 10) && db < nowDist + 0.5) {
         const near = nowDist - db < 4, xb = X(db);
         g.strokeStyle = near && Math.floor(S.t * 6) % 2 ? '#ffffff' : '#ffb35e'; g.lineWidth = 1;
         g.setLineDash([2, 1.5]); g.beginPath(); g.moveTo(xb, gy); g.lineTo(xb, gy + gh); g.stroke(); g.setLineDash([]);
@@ -3397,14 +4260,14 @@ function drawCurve(x, y, w, h, trace, band, nowDist, light = false) {
   if (trace.length > 1) {
     g.lineWidth = 1.4; g.lineCap = 'round';
     for (let i = 1; i < trace.length; i++) {
-      const [d0, v0] = trace[i - 1], [d1, v1] = trace[i], vt = targetKmh(d1);
-      g.strokeStyle = d1 < 10 ? '#ffffff' : v1 > vt + 1.5 ? '#ff6b5b' : v1 < vt - 8 ? '#ffd75e' : '#ffffff';
+      const [d0, v0] = trace[i - 1], [d1, v1] = trace[i], vt = T(d1);
+      g.strokeStyle = d1 < eye ? '#ffffff' : v1 > vt + 1.5 ? '#ff6b5b' : v1 < vt - 8 ? '#ffd75e' : '#ffffff';
       g.beginPath(); g.moveTo(X(d0), Y(v0)); g.lineTo(X(d1), Y(v1)); g.stroke();
     }
     g.lineCap = 'butt';
   }
   if (nowDist !== undefined) {
-    const kmh = S.v * 3.6, vt = targetKmh(nowDist), c = nowDist < 10 ? '#ffffff' : kmh > vt + 1.5 ? '#ff6b5b' : kmh < vt - 8 ? '#ffd75e' : '#7dff8a';
+    const kmh = S.v * 3.6, vt = T(nowDist), c = nowDist < eye ? '#ffffff' : kmh > vt + 1.5 ? '#ff6b5b' : kmh < vt - 8 ? '#ffd75e' : '#7dff8a';
     g.fillStyle = 'rgba(255,255,255,0.25)'; g.beginPath(); g.arc(X(nowDist), Y(kmh), 3.5, 0, 7); g.fill();
     g.fillStyle = c; g.beginPath(); g.arc(X(nowDist), Y(kmh), 2.2, 0, 7); g.fill();
   }
@@ -3413,11 +4276,28 @@ function drawCurve(x, y, w, h, trace, band, nowDist, light = false) {
 function drawGauge() {
   if (S.phase !== 'drive' || S.next >= STATIONS.length) return;
   const st = STATIONS[S.next], dist = st.pos - S.pos;
-  if (dist > CURVE_D || dist < -PE) return;
+  const bend = dist > CURVE_D && bendProfileOn() ? (activeBend() || S.bends.find(b => S.pos <= b.pos + b.len + 20)) : null;
+  if (!bend && (dist > CURVE_D || dist < -PE)) return;
+  if (!bend && FIRE() && st.zombie) return;   // station infestée : pas de courbe d'arrêt, on traverse
   // la courbe glisse vers la droite quand une caméra intérieure occupe le bas gauche de l'écran
   const camOpen = S.camAt !== undefined && S.t - S.camAt < 0.15;
   S.gaugeX = S.gaugeX === undefined ? 0 : S.gaugeX + ((camOpen ? 1 : 0) - S.gaugeX) * 0.2;
   const bw = 176, bh = 62, bx = Math.round(W / 2 - bw / 2 + S.gaugeX * (162 - (W / 2 - bw / 2))), by = VIEW_H - bh - 4;
+  if (bend) {   // courbe de freinage du virage : la cible est la vitesse limite à l'entrée, puis tenue jusqu'à la sortie
+    const d = bend.pos - S.pos, inB = d <= 0 && S.pos <= bend.pos + bend.len, kmh = S.v * 3.6, vt = bendEnv(S.pos);
+    drawBendProfile(bx, by + 11, bw, bh - 11);
+    g.fillStyle = 'rgba(8,10,14,0.88)'; g.fillRect(bx, by, bw, 11);
+    const idx = S.bends.indexOf(bend) + 1, nb = S.bends.length;
+    const BN = bend.sw ? `AIGUILLE ${bend.swIdx}/${bend.swTot} DÉVIÉE` : 'VIRAGE';
+    txt(`${nb > 1 && !bend.sw ? `${idx}/${nb} ` : ''}${inB ? `${BN} ${bend.lim} · reste ${Math.max(0, bend.pos + bend.len - S.pos).toFixed(0)} m` : d > 0 ? `${BN} ${bend.lim} · ${d.toFixed(0)} m` : bend.sw ? 'SORTIE DE L\'AIGUILLE' : 'SORTIE DE VIRAGE'}`, bx + 4, by + 9, 10, '#ffffff', 'left', 'VT323', 108);
+    let label, col;
+    if (kmh > bend.lim + 1 && inB) { label = 'DÉRAILLEMENT !'; col = '#ff3a2a'; }
+    else if (kmh > vt + 1.5) { label = keyBrake() ? 'FREINEZ ENCORE' : 'FREINEZ !'; col = '#ff6b5b'; }
+    else if (kmh >= vt - 10) { label = 'ZONE VERTE'; col = '#7dff8a'; }
+    else { label = inB ? 'TROP LENT' : 'ACCÉLÉREZ'; col = '#ffd75e'; }
+    if (!/FREINEZ !|DÉRAILLEMENT/.test(label) || Math.floor(S.t * 6) % 2) txt(label, bx + bw - 4, by + 9, 10, col, 'right', 'VT323', 56);
+    return;
+  }
   // la courbe s'efface entre 15 et 10 m : la finition se fait à l'œil (loupe + bips)
   const band = Math.max(0, Math.min(1, (dist - 10) / 5));
   drawCurve(bx, by + 11, bw, bh - 11, S.trace, band, dist);
@@ -3465,7 +4345,7 @@ function drawFx() {
     const ontime = Math.abs(f.dt) <= 2;
     const rows = [
       [(f.stars.p ? '★ ' : '☆ ') + `Arrêt à ${f.ae.toFixed(1)} m ${f.err < 0 ? 'avant' : 'après'} la marque`, f.stars.p ? '#ffd75e' : '#cfd6e6'],
-      [(f.stars.t ? '★ ' : '☆ ') + (ontime ? 'Pile à l\'heure !' : f.dt > 0 ? `Arrivé ${f.dt} s en retard` : `Arrivé ${-f.dt} s en avance`), f.stars.t ? '#ffd75e' : f.dt > 0 ? '#ff8a7a' : '#7fd4ff'],
+      S.fire ? [f.gr.time[0], f.gr.time[1]] : [(f.stars.t ? '★ ' : '☆ ') + (ontime ? 'Pile à l\'heure !' : f.dt > 0 ? `Arrivé ${f.dt} s en retard` : `Arrivé ${-f.dt} s en avance`), f.stars.t ? '#ffd75e' : f.dt > 0 ? '#ff8a7a' : '#7fd4ff'],
     ];
     g.fillStyle = 'rgba(6,8,14,0.82)'; g.fillRect(x, y, w, 28); 
     rows.forEach(([l, c], i) => txt(l, x + w / 2, y + 12 + i * 11, 12, c, 'center', 'VT323', w - 12));
@@ -3824,41 +4704,42 @@ function drawDoorAlarm() {
 function drawMsgs() {
   if (!S.msgs.length) return;
   const cctv = S.mode === 'running' && S.phase !== 'drive', drive = S.mode === 'running' && !cctv;
-  const last = S.msgs[S.msgs.length - 1];
-  // messages arrivés ensemble (ex. pénalité + mission échouée) : une seule ligne
-  const group = S.msgs.filter(m => Math.abs(m.t - last.t) < 0.4);
-  const text = group.map(m => m.text).join('  ·  ');
-  const a = Math.min(1, (last.life - last.t) * 2, last.t * 8);
-  g.globalAlpha = a;
-  // en conduite, le bandeau évite les panneaux affichés : caméra plafond (droite), train devant (centre), itinéraire (gauche)
-  let left = 30, right = W - 30, y0 = cctv ? CAM_Y0 + CAM_H - 5 : drive ? 40 : 14;
+  let left = 30, right = W - 30, y0 = cctv ? CAM_Y0 + CAM_H - 5 : 14, bottom = false;
   const fxOn = cctv && S.fx && S.fx.t < 5;
-  if (fxOn) { left = 131; right = W - 4; }   // bilan d'arrivée affiché : le bandeau passe au-dessus, sur les caméras
+  if (fxOn) { left = 131; right = W - 4; }   // bilan d'arrivée affiché : les messages passent au-dessus, sur les caméras
   if (drive && S.phase === 'drive') {
+    // en conduite : en bas de la vue, pour laisser libres le tunnel et les signaux
+    bottom = true;
+    const cam = S.camAt !== undefined && S.t - S.camAt < 0.15;
+    if (cam) left = 160;
     const st = STATIONS[S.next], dz = st ? st.pos - S.pos : 99;
-    if (S.next < STATIONS.length && dz <= 15 && dz >= -PE) right = W - 172;
-    if (S.vperm * 3.6 < 66) y0 = 67;
-    const sw = S.sw; if (sw && sw.kind === 'fork' && !sw.passed && !S.rev && sw.pos >= S.pos && y0 > 48) left = 86;
-  }
-  const maxW = right - left;
-  let size = 14; g.font = `${size}px VT323, monospace`;
-  while (size > 10 && g.measureText(text).width > maxW - 12) { size--; g.font = `${size}px VT323, monospace`; }
-  // trop long même en petit : coupure en deux lignes équilibrées
-  let lines = [text];
-  if (g.measureText(text).width > maxW - 12) {
-    const words = text.split(' '); let best = null;
-    for (let i = 1; i < words.length; i++) {
-      const a = words.slice(0, i).join(' '), b = words.slice(i).join(' '), m = Math.max(g.measureText(a).width, g.measureText(b).width);
-      if (!best || m < best[0]) best = [m, a, b];
+    if ((S.next < STATIONS.length && dz <= CURVE_D && dz >= -PE) || bendProfileOn()) {   // courbe d'arrêt (ou de virage) affichée en bas au centre
+      const gL = Math.round(W / 2 - 88 + (S.gaugeX || 0) * (162 - (W / 2 - 88)));
+      if (!cam) { left = 6; right = gL - 4; } else { bottom = false; y0 = 40; left = 30; right = W - 30; if (dz <= 15) right = W - 172; }
     }
-    if (best) lines = [best[1], best[2]];
   }
-  const w = Math.min(maxW, Math.max(...lines.map(l => g.measureText(l).width)) + 12), bh = 3 + 11 * lines.length;
-  if (fxOn) y0 = 52 - bh;
-  const cx = (left + right) / 2;
-  g.fillStyle = 'rgba(6,8,14,0.82)'; g.fillRect(Math.round(cx - w / 2), y0, Math.round(w), bh);
-  g.fillStyle = last.col; g.fillRect(Math.round(cx - w / 2), y0, 2, bh);
-  lines.forEach((l, i) => txt(l, cx, y0 + 11 + i * 11, size, last.col, 'center', 'VT323', maxW - 12));
+  const maxW = right - left, cx = (left + right) / 2;
+  // une carte par message (au plus deux), jamais collés dans une même phrase ; coupure en lignes si besoin
+  const cards = S.msgs.slice(-2).map(m => {
+    let size = 12; g.font = `${size}px VT323, monospace`;
+    while (size > 10 && g.measureText(m.text).width > maxW - 10) { size--; g.font = `${size}px VT323, monospace`; }
+    const lines = [];
+    let cur = '';
+    m.text.split(' ').forEach(wd => { const t = cur ? cur + ' ' + wd : wd; if (cur && g.measureText(t).width > maxW - 10) { lines.push(cur); cur = wd; } else cur = t; });
+    if (cur) lines.push(cur);
+    const w = Math.min(maxW, Math.max(...lines.map(l => g.measureText(l).width)) + 10);
+    return { m, size, lines: lines.slice(0, 3), w, h: 3 + 10 * Math.min(3, lines.length) };
+  });
+  const total = cards.reduce((t, c) => t + c.h, 0) + 2 * (cards.length - 1);
+  let y = fxOn ? 52 - total : bottom ? VIEW_H - 4 - total : y0;
+  cards.forEach(c => {
+    const m = c.m, x = Math.round(cx - c.w / 2);
+    g.globalAlpha = Math.max(0, Math.min(1, (m.life - m.t) * 2, m.t * 8));
+    g.fillStyle = 'rgba(6,8,14,0.6)'; g.fillRect(x, y, Math.round(c.w), c.h);
+    g.fillStyle = m.col; g.fillRect(x, y, 1.5, c.h);
+    c.lines.forEach((l, i) => txt(l, cx + 1, y + 10 + i * 10, c.size, m.col, 'center', 'VT323', maxW - 10));
+    y += c.h + 2;
+  });
   g.globalAlpha = 1;
 }
 
@@ -3881,7 +4762,7 @@ function drawHelp() {
     '+5 par voyageur monté, −5 par voyageur laissé,',
     '−10 par seconde d\'écart à l\'arrivée : attendre ou partir ?',
     '🛡 Sécurité : chaque faute enlève des points.',
-    `Médailles : bronze ${MEDALS[0][0]} · argent ${MEDALS[1][0]} · or ${MEDALS[2][0]}`,
+    `Médailles : bronze ${MEDS()[0][0]} · argent ${MEDS()[1][0]} · or ${MEDS()[2][0]}`,
   ]);
   col(198, 28, 'CAMÉRAS DE QUAI', [
     ['#3dff6a', '■porte libre'],
@@ -3913,7 +4794,7 @@ function drawHelp() {
     'Espace : veille automatique (quand elle sonne).',
     'M : missions · H : louches · Échap : pause',
   ]);
-  txt('GAME OVER si : voyageur percuté · collision avec le train devant · déraillement · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
+  txt(FIRE() ? 'GAME OVER si : la vague de feu rattrape la rame · voyageur percuté · déraillement' : 'GAME OVER si : voyageur percuté · collision avec le train devant · déraillement · 3 arrêts ratés · trafic à 100 %', W / 2, 203, 9, '#ff8a7a', 'center', 'VT323', W - 16);
   txt('? ou Échap : reprendre', W / 2, 212, 9, '#8fa0b8', 'center');
 }
 function keycap(x, y, label, w = 12) {
@@ -3926,7 +4807,7 @@ const TITLE = { stage: 0, t: 0, sel: LINE, best: [] };
 const INTRO_HIT = 3.2;                   // instant où la rame passe et où le logo s'abat
 function titleGo() {
   TITLE.stage = 1; TITLE.t = 0; TITLE.sel = LINE;
-  TITLE.best = LINES.map(Ln => { try { return +localStorage.getItem('dm_best_' + Ln.id) || 0; } catch (e) { return 0; } });
+  TITLE.best = LINES.map(Ln => { try { return +localStorage.getItem('dm_best_' + modeId(Ln.id)) || 0; } catch (e) { return 0; } });
   noise(0.6, 0.25, 'bandpass', 900, 0.8, 0, 0.05); beep(392, 0.08, 'square', 0.05); beep(587, 0.12, 'square', 0.05, 0.07);
   startMusic();
 }
@@ -4084,23 +4965,31 @@ function drawTitle() {
   g.textAlign = 'left';
   // bouton
   const pulse = 0.5 + 0.5 * Math.sin(S.t * 5);
-  g.font = '8px "Press Start 2P", monospace'; const lab = 'ENTRÉE : PRENDRE LE SERVICE', bw = Math.ceil(g.measureText(lab.replace('É', 'E')).width) + 22;
+  g.font = '8px "Press Start 2P", monospace'; const lab = FIRE() ? 'ENTRÉE : FUIR LA VAGUE' : 'ENTRÉE : PRENDRE LE SERVICE', bw = Math.ceil(g.measureText(lab.replace('É', 'E')).width) + 22;
   g.fillStyle = `rgba(255,215,94,${0.14 + 0.22 * pulse})`; g.fillRect(W / 2 - bw / 2, 160, bw, 18);
   g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.strokeRect(W / 2 - bw / 2 + 0.5, 160.5, bw - 1, 17);
   pixText(lab, W / 2, 173, 8, '#ffffff', null);
-  txt('Un maximum de voyageurs, à l\'heure, arrêt pile sur la marque', W / 2, 192, 10, '#a8b2c6', 'center', 'VT323', W - 30);
-  txt('◄ ►  ligne    C  classement    T  tutoriel    ?  aide    F  plein écran', W / 2, 207, 10, '#6f7a90', 'center');
-  txt(VERSION, W - 4, 214, 8, '#4a5468', 'right');
+  // sélecteur de mode (▲ ▼)
+  const fire = FIRE();
+  [['SERVICE NORMAL', false], ['🔥 VAGUE DE FEU', true]].forEach(([lab, f], j) => {
+    const on = f === fire, bx = W / 2 + (j ? 4 : -112), by = 182;
+    g.fillStyle = on ? (f ? 'rgba(255,90,20,0.3)' : 'rgba(120,170,255,0.22)') : 'rgba(255,255,255,0.04)'; g.fillRect(bx, by, 108, 13);
+    g.strokeStyle = on ? (f ? '#ff8a3a' : '#9fc4ff') : '#2e3446'; g.lineWidth = 1; g.strokeRect(bx + 0.5, by + 0.5, 107, 12);
+    txt(lab, bx + 54, by + 10, 11, on ? '#ffffff' : '#6f7a90', 'center', 'VT323', 104);
+  });
+  txt(fire ? 'Le feu remonte la ligne : embarquez un maximum de voyageurs et fuyez jusqu\'au terminus' : 'Un maximum de voyageurs, à l\'heure, arrêt pile sur la marque', W / 2, 204, 10, fire ? '#ffb38a' : '#a8b2c6', 'center', 'VT323', W - 20);
+  txt('◄ ► ligne   ▲ ▼ mode   C classement   T tutoriel   ? aide   F plein écran', W / 2, 214, 9, '#6f7a90', 'center', 'VT323', W - 60);
+  txt(VERSION, W - 4, 8, 8, '#4a5468', 'right');
   if (TITLE.rank) drawRanking();
 }
 // classement local de la ligne choisie : 5 meilleurs services et meilleures médailles par catégorie
 function drawRanking() {
-  const Ln = LN(), top = loadTop(Ln.id), cat = loadCat(Ln.id);
+  const Ln = LN(), top = loadTop(modeId(Ln.id)), cat = loadCat(modeId(Ln.id));
   const x = 62, y = 22, w = W - 124, h = 170;
   g.fillStyle = 'rgba(4,6,12,0.96)'; g.fillRect(x, y, w, h);
   g.strokeStyle = Ln.col; g.lineWidth = 1.5; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   g.fillStyle = Ln.col; g.fillRect(x, y, w, 16);
-  pixText(`CLASSEMENT · LIGNE ${Ln.num}`, x + w / 2, y + 12, 8, Ln.fg, null);
+  pixText(`${FIRE() ? 'FUITE' : 'CLASSEMENT'} · LIGNE ${Ln.num}`, x + w / 2, y + 12, 8, Ln.fg, null);
   txt('Rang', x + 12, y + 30, 10, '#8fa0b8'); txt('Score', x + 44, y + 30, 10, '#8fa0b8'); txt('Médaille', x + 92, y + 30, 10, '#8fa0b8');
   ['Pon.', 'Aig.', 'Voy.'].forEach((l, j) => txt(l, x + 160 + j * 22, y + 30, 10, '#8fa0b8', 'center')); txt('Date', x + w - 12, y + 30, 10, '#8fa0b8', 'right');
   for (let i = 0; i < 5; i++) {
@@ -4109,7 +4998,7 @@ function drawRanking() {
     txt(`${i + 1}.`, x + 14, yy, 11, rc);
     if (!e) { txt('—', x + 44, yy, 11, '#4a5468'); continue; }
     txt(String(e.s), x + 44, yy, 11, '#ffffff');
-    const md = medalOf(e.s); if (md) { medalDot(x + 96, yy - 3, MEDALS.indexOf(md) + 1, 3.5); txt(md[1], x + 103, yy, 10, md[2]); } else txt('—', x + 96, yy, 10, '#4a5468');
+    const md = medalOf(e.s); if (md) { medalDot(x + 96, yy - 3, MEDS().indexOf(md) + 1, 3.5); txt(md[1], x + 103, yy, 10, md[2]); } else txt('—', x + 96, yy, 10, '#4a5468');
     (e.m || []).forEach((lv, j) => medalDot(x + 160 + j * 22, yy - 3, lv, 3.5));
     txt(e.d || '', x + w - 12, yy, 10, '#8fa0b8', 'right');
   }
@@ -4126,26 +5015,30 @@ function drawRanking() {
 function drawEnd() {
   g.fillStyle = 'rgba(4,5,9,0.88)'; g.fillRect(0, 0, W, H);
   if (S.over) { txt('GAME OVER', W / 2, 18, 12, '#ff4a3a', 'center', '"Press Start 2P"'); txt(S.over.title, W / 2, 28, 11, '#ffb3a8', 'center', 'VT323', W - 20); }
-  else txt('FIN DE SERVICE', W / 2, 18, 12, '#ffd75e', 'center', '"Press Start 2P"');
-  txt('Station', 20, 32, 12, '#8fa0b8'); txt('Horaire', 112, 32, 12, '#8fa0b8'); txt('Arrêt', 158, 32, 12, '#8fa0b8'); txt('Voy.', 204, 32, 12, '#8fa0b8'); txt('Étoiles', 248, 32, 12, '#8fa0b8'); txt('Points', 366, 32, 12, '#8fa0b8', 'right');
+  else txt(S.fire ? `ABRI ATTEINT · NOTE ${S.note}/20` : 'FIN DE SERVICE', W / 2, 18, 12, S.fire ? NOTE_LBL(S.note)[1] : '#ffd75e', 'center', '"Press Start 2P"');
+  txt('Station', 20, 32, 12, '#8fa0b8'); txt(S.fire ? 'Vague' : 'Horaire', 112, 32, 12, '#8fa0b8'); txt('Arrêt', 158, 32, 12, '#8fa0b8'); txt('Voy.', 204, 32, 12, '#8fa0b8'); txt('Étoiles', 248, 32, 12, '#8fa0b8'); txt('Points', 366, 32, 12, '#8fa0b8', 'right');
   STATIONS.forEach((s, i) => {
     const y = 32 + (i + 1) * 9.6;
     const r = s.res;
     txt(s.name, 20, y, 12, '#e6ecf5', 'left', 'VT323', 88);
     if (r.offer > 0) txt(`${r.board}/${r.offer}`, 204, y, 12, r.left === 0 ? '#7dff8a' : '#ffb35e');
+    if (S.fire && r.lost) txt(`†${r.lost}`, 260, y, 11, '#ff8a5b');
     if (i > 0) {
       if (r.closed) txt('fermée', 112, y, 12, '#9fe0ff');
-      else if (r.skipped) txt('brûlée', 112, y, 12, '#ff6b5b');
+      else if (r.zok) txt('☣ évitée', 112, y, 12, '#9aff6a');
+      else if (r.skipped) txt(S.fire ? 'sans arrêt' : 'brûlée', 112, y, 12, '#ff6b5b');
       else if (r.dt !== null) {
         const ad = Math.abs(r.dt);
-        txt(r.dt > 1 ? `+${r.dt} s` : r.dt < -1 ? `${r.dt} s` : 'à l\'heure', 112, y, 12, ad <= 1 ? '#7dff8a' : ad <= 5 ? '#ffd75e' : '#ff6b5b');
+        if (S.fire && s.zombie) txt(`☣ -${r.zbit || 0}`, 112, y, 12, '#9aff6a');
+        else if (S.fire) txt(`${r.fireGap} m`, 112, y, 12, fireCol(r.fireGap));
+        else txt(r.dt > 1 ? `+${r.dt} s` : r.dt < -1 ? `${r.dt} s` : 'à l\'heure', 112, y, 12, ad <= 1 ? '#7dff8a' : ad <= 5 ? '#ffd75e' : '#ff6b5b');
         const ae = Math.abs(r.err);
         txt(`${r.err >= 0 ? '+' : '−'}${ae.toFixed(1)} m`, 158, y, 12, ae <= 0.5 ? '#7dff8a' : ae <= 2 ? '#ffd75e' : '#ff6b5b');
       }
     }
-    if (r.stars) ['p', 't', 'v'].forEach((k, j) => { if (r.stars[k] !== null && r.stars[k] !== undefined) txt('★', 248 + j * 10, y, 12, r.stars[k] ? '#ffd75e' : '#3a3e4a'); });
+    if (r.stars) (S.fire ? ['p'] : ['p', 't', 'v']).forEach((k, j) => { if (r.stars[k] !== null && r.stars[k] !== undefined) txt('★', 248 + j * 10, y, 12, r.stars[k] ? '#ffd75e' : '#3a3e4a'); });
     if (r.mult > 1) txt('x' + r.mult, 282, y, 11, '#9fe0ff');
-    const tot = r.pts + r.pen + 5 * r.board - 5 * r.left;
+    const tot = r.pts + r.pen + 5 * r.board - (S.fire ? 0 : 5 * r.left);
     txt(String(tot), 366, y, 12, tot >= 0 ? '#e6ecf5' : '#ff6b5b', 'right');
   });
   const max = (STATIONS.length - 1) * 200, b = S.base + Math.min(0, S.score - S.base);
@@ -4160,12 +5053,13 @@ function drawEnd() {
   const pil = [['la précision', cnt('p') / nArr], ['la ponctualité', cnt('t') / nArr], ['le remplissage', cnt('v') / nDep], ['la sécurité', secPct() / 100]];
   const weak = pil.reduce((a, b) => b[1] < a[1] ? b : a);
   const totStars = cnt('p') + cnt('t') + cnt('v');
-  txt(`★ ${totStars} étoiles  ·  🛡 ${secPct()} %  ·  voyageurs ${S.pax}/${S.paxOffer}  ·  trafic +${S.trafBonus}  ·  point faible : ${weak[0]}`, W / 2, 163, 11, '#e6ecf5', 'center', 'VT323', W - 16);
+  if (S.fire) txt(`🔥 ${S.saved} voyageurs sauvés  ·  ${S.lost} perdus (†)  ·  ☣ ${STATIONS.filter(x => x.res.zok).length} station${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''} infestée${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''} évitée${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''}  ·  🛡 ${secPct()} %`, W / 2, 163, 11, '#ffd0a8', 'center', 'VT323', W - 16);
+  else txt(`★ ${totStars} étoiles  ·  🛡 ${secPct()} %  ·  ⚗ ${S.vialPerfect || 0} dosage${(S.vialPerfect || 0) > 1 ? 's' : ''} parfait${(S.vialPerfect || 0) > 1 ? 's' : ''}  ·  trafic +${S.trafBonus}  ·  point faible : ${weak[0]}`, W / 2, 163, 11, '#e6ecf5', 'center', 'VT323', W - 16);
   if (S.cat) CAT.forEach((c, i) => {      // médailles par catégorie
     const cx = 34 + i * 118, lv = S.cat[i], blink = S.catNew[i] && lv > 0 && Math.floor(S.t * 4) % 2;
     medalDot(cx, 172, lv);
     txt(c[0], cx + 7, 175, 10, '#8fa0b8');
-    txt(lv < 0 ? 'aucun' : lv ? LVL[lv][0] + (S.catNew[i] ? ' !' : '') : `${Math.round(S.catR[i] * 100)} %`, cx + 7 + 58, 175, 10, blink ? '#ffffff' : lv > 0 ? LVL[lv][1] : '#6f7a90');
+    txt(lv < 0 ? '—' : lv ? LVL[lv][0] + (S.catNew[i] ? ' !' : '') : `${Math.round(S.catR[i] * 100)} %`, cx + 7 + 58, 175, 10, blink ? '#ffffff' : lv > 0 ? LVL[lv][1] : '#6f7a90');
   });
   const med = medalOf(S.score);
   if (med) {   // médaille avec ruban
@@ -4192,10 +5086,11 @@ function render() {
     drawScene(); drawTitle(); if (S.help) drawHelp(); return;
   }
   drawScene();
+  drawFireGlow();
   drawGauge();
   drawCab();
-  if (S.mode === 'running' && S.phase !== 'drive') { drawCCTV(); drawPops(); drawTraffic(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); }
-  if (S.mode === 'running' && S.phase === 'drive') { drawSchedChip(); drawLeaderPanel(); drawTopCam(); drawTrafficWarn(); drawSwitchPanel(); }
+  if (S.mode === 'running' && S.phase !== 'drive') { drawCCTV(); drawPops(); if (S.fire) { drawFirePanel(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); } else drawTraffic(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); }
+  if (S.mode === 'running' && S.phase === 'drive') { if (S.fire) { drawFireChip(); drawRearCam(); } else { drawSchedChip(); drawLeaderPanel(); drawTrafficWarn(); } drawTopCam(); }
   if (S.alarm && Math.floor(S.t * 4) % 2) { g.fillStyle = 'rgba(255,0,0,0.12)'; g.fillRect(0, 0, W, VIEW_H); }
   drawDoorAlarm();
   if (S.mode === 'running' && S.phase === 'drive' && S.person && S.person.state === 'track' && S.person.seen) {   // danger : cadre rouge pulsé
@@ -4205,14 +5100,15 @@ function render() {
     vg.addColorStop(0, 'rgba(255,0,0,0)'); vg.addColorStop(1, `rgba(255,0,0,${0.3 * pz})`); g.fillStyle = vg; g.fillRect(0, 0, W, VIEW_H);
   }
   drawFx();
-  if (S.mode === 'running') { drawManual(); drawReverse(); drawCabCam(S.cab); drawCabCam(S.malaise); drawIncidentBars(); drawRadio(); drawAnnonce(); drawTheft(); }
+  if (S.mode === 'running') { drawReverse(); drawCabCam(S.cab); drawCabCam(S.malaise); drawIncidentBars(); drawRadio(); drawAnnonce(); drawTheft(); drawManual(); }   // le jeu de flèches passe par-dessus tout
   if (S.mode === 'running' && S.missionShow > 0 && !S.radio) {
     g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 110, 54, 220, 50);
     drawMissions(W / 2 - 102, 66, false);
   }
   drawHint();
   drawTuto();
-  drawMsgs();
+  if (!S.mg) drawMsgs();   // pendant le jeu de flèches, pas de messages par-dessus
+  drawUnload();
   if (S.mode === 'title') drawTitle();
   if (S.mode === 'end') drawEnd();
   if (S.mode === 'running' && S.over) drawGameOver();
