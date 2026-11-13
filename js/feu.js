@@ -417,7 +417,7 @@ function drawIncidentBars() {
   });
 }
 // ---------- Mode feu : zombies agrippés au pare-brise (en traversant une station infestée) ----------
-// Ils masquent la vue. Le frein d'urgence (B) les projette tous ; un virage pris vite en décroche un ; ceux qui restent
+// Ils masquent la vue. Un frein d'urgence (B) donné au bon moment les projette tous ; un virage pris vite en décroche un ; ceux qui restent
 // jusqu'à la station suivante se faufilent dans la rame et contaminent des voyageurs.
 const WZ_SKIN = ['#7f9a6a', '#6e8a5c', '#8aa276', '#748f63'];
 function windZombiesJump(st, nForce) {
@@ -426,7 +426,7 @@ function windZombiesJump(st, nForce) {
   const slots = [0.24, 0.5, 0.76].sort(() => Math.random() - 0.5);
   for (let i = 0; i < n; i++) S.wz.push({ x: W * slots[i] + (Math.random() - 0.5) * 30, y: VIEW_H - 40 - Math.random() * 30, s: 0.85 + Math.random() * 0.35,
     skin: pick(WZ_SKIN), ph: Math.random() * 6, t: 0, off: false, vx: 0, vy: 0, rot: 0, a: 1, land: 0.25 + i * 0.18 });
-  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Frein d'urgence (B) pour ${n > 1 ? 'les' : 'le'} projeter`, '#9aff6a', 3.5);
+  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! B quand l'aiguille est dans le rouge pour ${n > 1 ? 'les ' : 'l\''}arracher`, '#9aff6a', 3.5);
   noise(0.3, 0.35, 'lowpass', 300, 0.8); beep(90, 0.2, 'triangle', 0.25);
 }
 const wzOn = () => (S.wz || []).filter(z => !z.off);
@@ -456,31 +456,49 @@ function updateWindZombies(dt) {
   const b = bendHere();
   if (b && S.v * 3.6 > 22 && wzOn().length) { S.wzBend = (S.wzBend || 0) + dt; if (S.wzBend > 1.1) { S.wzBend = 0; wzDetach('bend'); } } else S.wzBend = 0;
 }
-// frein d'urgence (B) : freinage très puissant (pas un arrêt net), la cabine plonge vers l'avant et l'écran tremble.
-// Au pic de la secousse, les zombies du pare-brise sont projetés, à condition d'aller assez vite.
-// Prix à payer : traction coupée jusqu'à l'arrêt, puis 2 s de réarmement, et la rame repart de zéro.
-const EB_DEC = 7, EB_REARM = 2, EB_EJECT = 20;   // m/s², s, km/h minimum pour éjecter
+// frein d'urgence (B) : un seul coup, au bon moment. Quand des zombies sont sur la vitre, une jauge apparaît :
+// une aiguille balaie d'un bout à l'autre, et il faut frapper B quand elle est dans la zone rouge.
+// Dans le rouge : freinage violent (la cabine plonge, étincelles, secousse), les zombies sont arrachés.
+// À côté : simple freinage d'urgence, ils restent accrochés. Dans les deux cas la rame s'arrête,
+// puis 2 s de réarmement : la tentative coûte cher, on ne la tente pas au hasard.
+const EB_SOFT = 3, EB_HARD = 9, EB_REARM = 2, EB_EJECT = 20;   // m/s² (raté / réussi), s, km/h minimum pour éjecter
+const EB_SWEEP = 0.6, EB_ZONE = 0.84;   // durée d'un balayage (s), début de la zone rouge (0 → 1)
+// position de l'aiguille : aller-retour régulier
+const ebNeedle = () => { const k = ((S.ebSw || 0) / EB_SWEEP) % 2; return k < 1 ? k : 2 - k; };
+const ebDec = () => S.eb && S.eb.hit ? EB_HARD : EB_SOFT;
 function emergencyBrake() {
-  if (S.over || S.phase !== 'drive' || S.rev || S.backup || S.mg || S.blast || S.eb) return;
+  if (S.over || S.phase !== 'drive' || S.rev || S.backup || S.mg || S.blast) return;
+  S.ebPressT = S.t;   // le coup de poing du pupitre s'enfonce
+  if (S.eb) return;   // un seul coup
   if (S.v < 0.5) { msg('Frein d\'urgence : la rame est déjà à l\'arrêt', '#ffb35e', 1.5); return; }
-  S.eb = { t: 0, kmh: S.v * 3.6, ejected: false, sp: [] };
-  noise(0.9, 0.45, 'highpass', 2800, 2); noise(0.4, 0.4, 'lowpass', 260, 0.8); beep(70, 0.25, 'square', 0.15);
+  const on = wzOn(), needle = ebNeedle(), hit = !on.length || needle >= EB_ZONE;   // sans zombie, pas de jauge : freinage violent d'office
+  S.eb = { t: 0, hit, p: hit ? 1 : 0.25, ejected: false, sp: [], pit: 0, needle, zg: on.length > 0, judged: !on.length };
+  noise(0.9, hit ? 0.45 : 0.25, 'highpass', 2800, 2); noise(0.4, hit ? 0.4 : 0.2, 'lowpass', 260, 0.8); beep(70, 0.25, 'square', hit ? 0.18 : 0.1);
+  if (on.length && !hit) { msg('Raté ! Coup de frein trop mou : les zombies tiennent bon', '#ff6b5b', 2.5); sfxBad(); }
+  else if (!on.length) msg('🛑 FREIN D\'URGENCE', '#ffb35e', 1.5);
   if (!FIRE()) pen(-30, `Freinage d'urgence à ${Math.round(S.v * 3.6)} km/h : voyageurs bousculés`);
 }
 function updateEmergencyBrake(dt) {
+  // l'aiguille ne tourne que lorsqu'il y a des zombies à arracher
+  if (!S.eb && FIRE() && S.phase === 'drive' && wzOn().length) S.ebSw = (S.ebSw || 0) + dt; else if (!S.eb) S.ebSw = 0;
   const e = S.eb; if (!e) return;
   e.t += dt;
-  // étincelles sous les roues, tant que la rame glisse
-  if (S.v > 0.5) for (let i = 0; i < 4; i++) { const sd = Math.random() < 0.5 ? -1 : 1;
+  const moving = S.v > 0.5 && !e.stopT;
+  // plongée de la cabine : forte si le coup est réussi
+  const tgt = moving ? e.p * Math.min(1, S.v * 3.6 / 40) * 18 : 0;
+  e.pit += (tgt - e.pit) * Math.min(1, dt * 12);
+  // étincelles sous les roues
+  if (moving) for (let i = 0; i < 1 + Math.round(e.p * 6); i++) { const sd = Math.random() < 0.5 ? -1 : 1;
     e.sp.push({ x: W / 2 + sd * (W * 0.3 + Math.random() * 40), y: VIEW_H - 6, vx: sd * (60 + Math.random() * 160), vy: -40 - Math.random() * 170, t: 0 }); }
   for (const p of e.sp) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; }
   e.sp = e.sp.filter(p => p.t < 0.5);
-  if (S.v > 0.5) S.shake = Math.max(S.shake, 0.25 + Math.min(0.35, S.v / 60));
-  // le coup de frein : au bout de 0,3 s, assez violent pour arracher les zombies
-  if (!e.ejected && e.t >= 0.3) {
-    e.ejected = true;
+  if (moving) S.shake = Math.max(S.shake, 0.1 + e.p * Math.min(0.5, S.v / 40));
+  // coup réussi : au pic de la secousse (0,2 s), les zombies sont arrachés
+  if (!e.judged && e.hit && e.t >= 0.2) {
+    e.judged = true;
     const on = wzOn();
-    if (on.length && e.kmh >= EB_EJECT) {
+    if (on.length && S.v * 3.6 >= EB_EJECT) {
+      e.ejected = true;
       if (!S.smears) S.smears = [];
       for (const z of on) {   // projetés vers l'avant, dans le tunnel
         z.off = true; z.vx = (z.x - W / 2) * 0.9 + (Math.random() - 0.5) * 90; z.vy = -300 - Math.random() * 140; z.rot = 0;
@@ -488,30 +506,39 @@ function updateEmergencyBrake(dt) {
       }
       S.score += 15 * on.length; S.shake = 0.8;
       noise(0.3, 0.35, 'lowpass', 500, 0.8); beep(130, 0.15, 'sawtooth', 0.08);
-      msg(`🛑 FREIN D'URGENCE ! ${on.length} zombie${on.length > 1 ? 's projetés' : ' projeté'} (+${15 * on.length})`, '#7dff8a', 2.5);
-    } else if (on.length) msg(`Trop lent pour les arracher : il faut au moins ${EB_EJECT} km/h au coup de frein`, '#ff6b5b', 2.5);
-    else msg('🛑 FREIN D\'URGENCE', '#ffb35e', 1.5);
+      msg(`💥 PILE DANS LE ROUGE ! ${on.length} zombie${on.length > 1 ? 's projetés' : ' projeté'} (+${15 * on.length})`, '#7dff8a', 2.5);
+    } else if (on.length) msg(`Trop lent pour les arracher : il faut rouler à ${EB_EJECT} km/h ou plus`, '#ff6b5b', 2.5);
   }
-  if (S.v <= 0.05 && !e.stopT) { e.stopT = e.t; S.ebT = EB_REARM; }
+  if (S.v <= 0.05 && !e.stopT) { e.stopT = e.t; S.ebT = EB_REARM; e.bounce = e.pit; S.ebSw = 0; }
+  if (e.stopT) { const k = e.t - e.stopT; e.pit = (e.bounce || 0) * Math.cos(k * 9) * Math.exp(-k * 5); }
   if (e.stopT && e.t - e.stopT > 0.6 && !e.sp.length) S.eb = null;
 }
-// plongée de la cabine vers l'avant : monte vite au coup de frein, retombe à l'arrêt (un petit rebond)
-function ebPitch() {
-  const e = S.eb; if (!e) return 0;
-  const up = Math.min(1, e.t / 0.18) * Math.min(1, e.kmh / 50) * 16;
-  if (!e.stopT) return up;
-  const k = e.t - e.stopT;
-  return up * Math.cos(k * 9) * Math.exp(-k * 5);
-}
+const ebPitch = () => S.eb ? S.eb.pit : 0;
 function drawEmergencyBrake() {
-  const e = S.eb; if (!e) return;
-  g.save(); g.globalCompositeOperation = 'lighter';
-  for (const p of e.sp) { const a = 1 - p.t / 0.5; g.strokeStyle = `rgba(255,${190 + Math.random() * 60 | 0},90,${a})`; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025); g.stroke(); }
-  g.restore();
-  if (!e.stopT || e.t - e.stopT < 0.3) {   // voyant rouge qui clignote
-    if (Math.floor(e.t * 6) % 2 === 0) { g.fillStyle = 'rgba(255,40,30,0.12)'; g.fillRect(0, 0, W, VIEW_H); }
+  const e = S.eb;
+  if (e) {
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (const p of e.sp) { const a = 1 - p.t / 0.5; g.strokeStyle = `rgba(255,${190 + Math.random() * 60 | 0},90,${a})`; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025); g.stroke(); }
+    g.restore();
+    if (!e.stopT && Math.floor(e.t * 6) % 2 === 0) { g.fillStyle = `rgba(255,40,30,${0.04 + e.p * 0.1})`; g.fillRect(0, 0, W, VIEW_H); }   // voyant rouge
   }
+  // jauge de timing : visible tant que des zombies sont sur la vitre (et juste après le coup, figée)
+  const show = e ? e.zg && e.t < 0.9 : FIRE() && S.phase === 'drive' && wzOn().length > 0;   // après le coup : l'aiguille reste figée un instant
+  if (!show) return;
+  const bw = 150, bx = W / 2 - bw / 2, by = 62, nd = e ? e.needle : ebNeedle(), inZone = nd >= EB_ZONE;
+  g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(bx - 6, by - 14, bw + 12, 28);
+  const title = e ? (e.hit ? 'PILE DANS LE ROUGE !' : 'RATÉ…') : 'FREIN D\'URGENCE : B DANS LE ROUGE !';
+  txt(title, W / 2, by - 3, 10, e ? (e.hit ? '#7dff8a' : '#ff6b5b') : '#ffd75e', 'center');
+  // fond : dégradé du jaune au rouge, zone rouge vive au bout
+  const gr = g.createLinearGradient(bx, 0, bx + bw, 0); gr.addColorStop(0, '#3a3216'); gr.addColorStop(EB_ZONE - 0.01, '#6a4a16'); gr.addColorStop(EB_ZONE, '#c8281c'); gr.addColorStop(1, '#ff3b2b');
+  g.fillStyle = gr; g.fillRect(bx, by, bw, 8);
+  if (!e && inZone) { g.fillStyle = 'rgba(255,90,70,0.35)'; g.fillRect(bx + bw * EB_ZONE - 2, by - 2, bw * (1 - EB_ZONE) + 4, 12); }   // la zone s'allume quand l'aiguille y est
+  g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 0.6; g.strokeRect(bx + bw * EB_ZONE, by, bw * (1 - EB_ZONE), 8);
+  // aiguille
+  const nx = bx + bw * nd;
+  g.fillStyle = '#ffffff'; g.fillRect(nx - 1, by - 3, 2, 14);
+  g.beginPath(); g.moveTo(nx - 3, by - 5); g.lineTo(nx + 3, by - 5); g.lineTo(nx, by - 1); g.fill();
 }
 // à l'arrivée en station : ceux qui sont encore agrippés se faufilent dans la rame
 function windZombiesBoard() {
@@ -524,33 +551,104 @@ function windZombiesBoard() {
 }
 // rendu : visages et mains plaqués contre la vitre, traces laissées sur le verre
 function drawWindZombies() {
+  // traînées laissées sur la vitre : sang séché et crasse qui coulent
   if (S.smears) for (const s of S.smears) {
-    const a = 0.35 * (1 - s.t / 18);
-    g.fillStyle = `rgba(70,90,50,${a})`;
-    for (let k = 0; k < 5; k++) { const dx = (k - 2) * 7 * s.s; g.fillRect(s.x + dx - 2 * s.s, s.y - 8 * s.s + Math.abs(k - 2) * 2, 4 * s.s, 26 * s.s + k * 3); }
+    const a = 0.5 * (1 - s.t / 18), run = Math.min(1, s.t / 3);
+    for (let k = 0; k < 5; k++) {
+      const dx = (k - 2) * 7 * s.s, x0 = s.x + dx - 2 * s.s, y0 = s.y - 8 * s.s + Math.abs(k - 2) * 2, len = (26 + k * 5 + run * 30 * ((k * 37) % 5) / 4) * s.s;
+      const gr = g.createLinearGradient(0, y0, 0, y0 + len);
+      gr.addColorStop(0, `rgba(80,22,14,${a})`); gr.addColorStop(0.6, `rgba(60,40,24,${a * 0.6})`); gr.addColorStop(1, 'rgba(60,40,24,0)');
+      g.fillStyle = gr; g.fillRect(x0, y0, 3.5 * s.s, len);
+    }
   }
   if (!S.wz || !S.wz.length) return;
   for (const z of S.wz) {
+    if (z.seed === undefined) z.seed = Math.random();
+    const R = texRand(Math.floor(z.seed * 1e9));   // variations propres à chaque zombie, stables d'une image à l'autre
     const land = Math.min(1, z.t / z.land), sc = z.s * (0.4 + 0.6 * land), wob = Math.sin(z.ph * 3) * 2, slide = z.off ? 0 : Math.sin(z.ph * 0.7) * 3;
+    const sk = z.skin, hasWound = R() < 0.7, woundX = (R() - 0.5) * 30, woundY = -22 + R() * 14, deadEye = R() < 0.35 ? (R() < 0.5 ? -1 : 1) : 0,
+      bald = R() < 0.4, jawOpen = 0.6 + 0.4 * Math.sin(z.ph * 4), shirt = ['#2b2e33', '#3a2f28', '#2c3328', '#3b3b42'][Math.floor(R() * 4)];
     g.save(); g.globalAlpha = z.a * Math.min(1, land * 1.5); g.translate(z.x + wob, z.y + slide); g.rotate(z.rot); g.scale(sc, sc);
-    // épaules et torse (vêtements en lambeaux)
-    g.fillStyle = '#2a2a24'; g.beginPath(); g.ellipse(0, 52, 56, 34, 0, Math.PI, 2 * Math.PI); g.fill(); g.fillRect(-56, 52, 112, 30);
-    g.fillStyle = '#3a3a30'; for (let k = -2; k <= 2; k++) g.fillRect(k * 18 - 3, 30, 6, 40);
-    // tête aplatie contre la vitre
-    g.fillStyle = z.skin; g.beginPath(); g.ellipse(0, 0, 30, 36, 0, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(0,0,0,0.18)'; g.beginPath(); g.ellipse(6, 6, 24, 30, 0, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(220,255,200,0.25)'; g.beginPath(); g.ellipse(-8, -8, 18, 22, 0, 0, Math.PI * 2); g.fill();   // reflet du nez écrasé sur le verre
-    g.fillStyle = '#1a1a14'; for (let k = 0; k < 7; k++) g.fillRect(-26 + k * 8, -38 + (k % 2) * 3, 5, 12);         // cheveux hirsutes
-    for (const ex of [-11, 11]) { g.fillStyle = '#120808'; g.beginPath(); g.ellipse(ex, -4, 8, 6, 0, 0, Math.PI * 2); g.fill();   // orbites
-      const gl = 0.6 + 0.4 * Math.sin(z.ph * 6 + ex); g.fillStyle = `rgba(255,40,30,${gl})`; g.beginPath(); g.arc(ex, -4, 3, 0, 7); g.fill(); }
-    g.fillStyle = '#200a08'; g.beginPath(); g.ellipse(0, 18, 12, 8 + 3 * Math.sin(z.ph * 4), 0, 0, Math.PI * 2); g.fill();   // bouche ouverte
-    g.fillStyle = '#d8d0a8'; for (let k = -2; k <= 2; k++) g.fillRect(k * 4 - 1, 11, 2.5, 4);
-    // mains à plat sur le verre, doigts écartés
+    // buée de la respiration sur la vitre
+    const br = 0.08 + 0.06 * Math.sin(z.ph * 2.2);
+    let gr = g.createRadialGradient(0, 22, 2, 0, 22, 34); gr.addColorStop(0, `rgba(210,225,215,${br})`); gr.addColorStop(1, 'rgba(210,225,215,0)');
+    g.fillStyle = gr; g.fillRect(-36, -12, 72, 70);
+    // épaules et torse : chemise déchirée, col ouvert, taches
+    gr = g.createLinearGradient(0, 28, 0, 90); gr.addColorStop(0, shirt); gr.addColorStop(1, '#0c0c0c');
+    g.fillStyle = gr; g.beginPath(); g.moveTo(-62, 90); g.quadraticCurveTo(-60, 40, -20, 34); g.lineTo(20, 34); g.quadraticCurveTo(60, 40, 62, 90); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(90,20,14,0.55)'; g.beginPath(); g.ellipse(-18 + R() * 30, 62, 14, 9, R(), 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-14, 36); g.lineTo(0, 58); g.lineTo(14, 36); g.stroke();   // col
+    for (let k = 0; k < 4; k++) { const tx = -50 + R() * 100; g.fillStyle = '#060606'; g.beginPath(); g.moveTo(tx, 90); g.lineTo(tx + 4, 70 + R() * 10); g.lineTo(tx + 9, 90); g.fill(); }   // lambeaux
+    // cou décharné
+    g.fillStyle = sk; g.fillRect(-12, 22, 24, 18); g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(-12, 22, 6, 18); g.fillRect(4, 26, 3, 14);
+    // tête : modelé par dégradé, peau grisâtre et marbrée
+    gr = g.createRadialGradient(-6, -8, 4, 0, 0, 40);
+    gr.addColorStop(0, '#c9cfb2'); gr.addColorStop(0.35, sk); gr.addColorStop(1, '#2e3a26');
+    g.fillStyle = gr; g.beginPath(); g.moveTo(0, -38); g.bezierCurveTo(26, -38, 32, -14, 28, 6); g.bezierCurveTo(25, 24, 14, 34, 0, 35); g.bezierCurveTo(-14, 34, -25, 24, -28, 6); g.bezierCurveTo(-32, -14, -26, -38, 0, -38); g.fill();
+    for (let k = 0; k < 6; k++) { g.fillStyle = `rgba(${R() < 0.5 ? '60,70,40' : '110,60,70'},${0.12 + R() * 0.14})`; g.beginPath(); g.ellipse((R() - 0.5) * 40, (R() - 0.5) * 50, 4 + R() * 8, 3 + R() * 6, R() * 3, 0, 7); g.fill(); }   // marbrures
+    // pommettes saillantes et joues creusées
+    for (const sd of [-1, 1]) {
+      g.fillStyle = 'rgba(20,30,15,0.35)'; g.beginPath(); g.ellipse(sd * 17, 14, 7, 11, sd * 0.3, 0, 7); g.fill();
+      g.fillStyle = 'rgba(230,235,210,0.18)'; g.beginPath(); g.ellipse(sd * 18, 2, 7, 4, sd * -0.3, 0, 7); g.fill();
+    }
+    // veines sur les tempes
+    g.strokeStyle = 'rgba(70,30,80,0.45)'; g.lineWidth = 0.9;
+    for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(sd * 24, -20); g.quadraticCurveTo(sd * 18, -12, sd * 22, -2); g.moveTo(sd * 21, -14); g.lineTo(sd * 15, -10); g.stroke(); }
+    // plaie ouverte
+    if (hasWound) {
+      g.fillStyle = '#3a0a06'; g.beginPath(); g.ellipse(woundX, woundY, 9, 3.5, 0.4, 0, 7); g.fill();
+      g.fillStyle = '#8a1d12'; g.beginPath(); g.ellipse(woundX, woundY, 6, 1.8, 0.4, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(120,25,15,0.7)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(woundX + 2, woundY + 2); g.lineTo(woundX + 3, woundY + 10 + 6 * Math.min(1, z.t / 2)); g.stroke();   // filet de sang
+    }
+    // orbites enfoncées, yeux laiteux qui fixent le conducteur
+    for (const ex of [-11, 11]) {
+      gr = g.createRadialGradient(ex, -5, 1, ex, -5, 11); gr.addColorStop(0, '#0a0606'); gr.addColorStop(0.6, 'rgba(25,15,15,0.85)'); gr.addColorStop(1, 'rgba(25,15,15,0)');
+      g.fillStyle = gr; g.beginPath(); g.ellipse(ex, -5, 11, 9, 0, 0, 7); g.fill();
+      if ((ex < 0 ? -1 : 1) === deadEye) { g.fillStyle = '#050303'; g.beginPath(); g.ellipse(ex, -4, 5, 4, 0, 0, 7); g.fill(); continue; }   // orbite vide
+      const look = Math.sin(z.ph * 0.9) * 1.2;
+      g.fillStyle = '#d9d6b8'; g.beginPath(); g.ellipse(ex, -4, 5.5, 4, 0, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(160,30,30,0.6)'; g.lineWidth = 0.5; g.beginPath(); g.moveTo(ex - 5, -4); g.lineTo(ex - 2, -3); g.moveTo(ex + 5, -5); g.lineTo(ex + 2, -4); g.stroke();
+      g.fillStyle = 'rgba(120,130,125,0.85)'; g.beginPath(); g.arc(ex + look, -4, 2.4, 0, 7); g.fill();   // iris voilé
+      g.fillStyle = '#1a1a1a'; g.beginPath(); g.arc(ex + look, -4, 0.9, 0, 7); g.fill();
+      g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(ex - 6, -9, 12, 2.5);   // paupière lourde
+    }
+    // nez écrasé contre la vitre : zone blanchie et aplatie
+    g.fillStyle = 'rgba(225,230,205,0.45)'; g.beginPath(); g.ellipse(0, 7, 8, 6, 0, 0, 7); g.fill();
+    g.fillStyle = '#1a120c'; g.beginPath(); g.ellipse(-3, 10, 1.8, 1.2, 0, 0, 7); g.ellipse(3, 10, 1.8, 1.2, 0, 0, 7); g.fill();
+    // mâchoire béante : lèvres déchirées, dents jaunies et inégales
+    const my = 21, mh = 6 + 6 * jawOpen;
+    gr = g.createLinearGradient(0, my - mh, 0, my + mh); gr.addColorStop(0, '#2a0806'); gr.addColorStop(1, '#0a0202');
+    g.fillStyle = gr; g.beginPath(); g.ellipse(0, my, 11, mh, 0, 0, 7); g.fill();
+    g.fillStyle = '#5a1810'; g.beginPath(); g.ellipse(4, my + mh - 2, 5, 2, 0, 0, 7); g.fill();   // langue
+    for (let k = -4; k <= 4; k++) { if (R() < 0.18) continue;   // dents manquantes
+      g.fillStyle = R() < 0.5 ? '#c9b98a' : '#a8946a'; g.fillRect(k * 2.4 - 1, my - mh + 1, 2, 2.5 + R() * 2);
+      if (Math.abs(k) < 4) g.fillRect(k * 2.4 - 1, my + mh - 3.5 - R() * 1.5, 2, 2.5); }
+    g.strokeStyle = 'rgba(130,40,30,0.8)'; g.lineWidth = 1.6; g.beginPath(); g.ellipse(0, my, 11.5, mh + 0.5, 0, Math.PI * 1.05, Math.PI * 1.95); g.stroke();
+    g.strokeStyle = 'rgba(160,190,150,0.35)'; g.lineWidth = 1.2;   // bave qui coule sur le verre
+    g.beginPath(); g.moveTo(-5, my + mh); g.lineTo(-6, my + mh + 6 + 10 * ((z.ph * 0.3) % 1)); g.stroke();
+    // cheveux collés, en mèches (ou crâne pelé)
+    g.strokeStyle = '#141410'; g.lineWidth = 2;
+    const nh = bald ? 5 : 14;
+    for (let k = 0; k < nh; k++) { const hx = -26 + (52 * k) / (nh - 1) + (R() - 0.5) * 4, len = 10 + R() * 16;
+      g.beginPath(); g.moveTo(hx * 0.8, -36); g.quadraticCurveTo(hx * 1.05 + (R() - 0.5) * 8, -30 + len * 0.3, hx * 1.1 + (R() - 0.5) * 6, -36 + len); g.stroke(); }
+    if (bald) { g.fillStyle = 'rgba(150,90,80,0.35)'; g.beginPath(); g.ellipse(6, -28, 9, 5, 0.2, 0, 7); g.fill(); }
+    // contour plaqué : la tête collée au verre dessine un liseré plus clair
+    g.strokeStyle = 'rgba(200,215,190,0.22)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(0, 2, 22, 26, 0, 0, 7); g.stroke();
+    // mains à plat sur la vitre : paume blanchie par la pression, phalanges, ongles noirs
     for (const sd of [-1, 1]) {
       g.save(); g.translate(sd * 58, -16 + Math.sin(z.ph * 2 + sd) * 3); g.rotate(sd * 0.25);
-      g.fillStyle = z.skin; g.beginPath(); g.ellipse(0, 0, 14, 16, 0, 0, Math.PI * 2); g.fill();
-      for (let f = -2; f <= 2; f++) { g.save(); g.rotate(f * 0.32); g.fillRect(-2.5, -34, 5, 22); g.beginPath(); g.arc(0, -34, 2.5, 0, 7); g.fill(); g.restore(); }
-      g.fillStyle = 'rgba(220,255,200,0.22)'; g.beginPath(); g.ellipse(-3, -2, 8, 9, 0, 0, Math.PI * 2); g.fill();
+      gr = g.createRadialGradient(0, 2, 2, 0, 0, 18); gr.addColorStop(0, '#d2d6bc'); gr.addColorStop(0.5, sk); gr.addColorStop(1, '#3a4a30');
+      g.fillStyle = gr; g.beginPath(); g.ellipse(0, 0, 14, 16, 0, 0, 7); g.fill();
+      for (let f = -2; f <= 2; f++) {
+        const L = f === 0 ? 26 : Math.abs(f) === 1 ? 24 : 18;
+        g.save(); g.rotate(f * 0.3 + (f === -2 ? -0.35 : 0) * sd);
+        g.fillStyle = sk; g.beginPath(); g.moveTo(-3, -10); g.lineTo(-2.4, -10 - L); g.arc(0, -10 - L, 2.4, Math.PI, 0); g.lineTo(3, -10); g.fill();
+        g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(-2.5, -10 - L * 0.45, 5, 1); g.fillRect(-2.2, -10 - L * 0.75, 4.4, 1);   // phalanges
+        g.fillStyle = '#1e1a10'; g.beginPath(); g.arc(0, -10 - L - 0.5, 1.8, Math.PI, 0); g.fill();   // ongle
+        g.fillStyle = 'rgba(230,235,215,0.3)'; g.beginPath(); g.ellipse(0, -10 - L * 0.85, 1.8, 2.6, 0, 0, 7); g.fill();   // bout du doigt écrasé
+        g.restore();
+      }
+      g.fillStyle = 'rgba(90,20,12,0.45)'; g.beginPath(); g.ellipse(sd * 4, 6, 5, 3, 0.5, 0, 7); g.fill();   // sang sur la paume
       g.restore();
     }
     g.restore();

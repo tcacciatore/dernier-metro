@@ -414,7 +414,6 @@ function render() {
     const vg = g.createRadialGradient(W / 2, VIEW_H / 2, VIEW_H * 0.4, W / 2, VIEW_H / 2, W * 0.62);
     vg.addColorStop(0, 'rgba(255,0,0,0)'); vg.addColorStop(1, `rgba(255,0,0,${0.3 * pz})`); g.fillStyle = vg; g.fillRect(0, 0, W, VIEW_H);
   }
-  drawFx();
   if (S.mode === 'running') { drawReverse(); drawCabCam(S.cab); drawCabCam(S.malaise); drawIncidentBars(); drawRadio(); drawTheft(); drawManual(); }   // le jeu de flèches passe par-dessus tout
   if (S.mode === 'running' && S.missionShow > 0 && !S.radio) {
     g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 110, 54, 220, 50);

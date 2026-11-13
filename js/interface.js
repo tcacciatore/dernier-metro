@@ -50,7 +50,7 @@ function drawConsoleWear(C0) {
   // rebord en caoutchouc écaillé
   for (let i = 0; i < 18; i++) { const x = hsh(i, 21) * W; g.fillStyle = 'rgba(80,80,85,0.5)'; g.fillRect(x, C0 + 0.5, 1 + hsh(i, 22) * 4, 1.2); }
   // étiquette jaunie collée au ruban adhésif, au bord du pupitre
-  g.save(); g.translate(352, bot - 16); g.rotate(-0.06);
+  g.save(); g.translate(W - 9, VIEW_H - 62); g.rotate(Math.PI / 2 - 0.05);   // sur le montant droit du pare-brise
   g.fillStyle = 'rgba(220,210,170,0.85)'; g.fillRect(0, 0, 26, 7);
   g.fillStyle = 'rgba(255,255,240,0.25)'; g.fillRect(-2, -1, 6, 3); g.fillRect(22, 5, 6, 3);
   g.fillStyle = 'rgba(120,100,60,0.25)'; g.fillRect(0, 5.5, 26, 1.5);
@@ -283,6 +283,31 @@ function drawCab() {
   g.fillStyle = kg; g.beginPath(); g.ellipse(mx, hy, 6, 3.6, 0, 0, 7); g.fill();
   g.fillStyle = lev < 0 ? mute('#3dff6a') : lev > 0 ? mute('#ff6b5b') : '#9aa1ae'; g.fillRect(mx - 2.5, hy - 0.5, 5, 1);
 
+  // arrêt d'urgence : « coup de poing » rouge sur platine jaune (touche B), il s'enfonce à chaque appui
+  {
+    const ex = 366, ey = cy - 2, e = S.eb, pressed = S.ebPressT !== undefined && S.t - S.ebPressT < 0.11;
+    const wzWait = FIRE() && S.phase === 'drive' && wzOn().length && !e;   // zombies sur la vitre : le bouton appelle
+    // platine jaune biseautée, vissée
+    g.fillStyle = '#0a0b0e'; g.fillRect(ex - 12.5, ey - 12.5, 25, 25);
+    const pl = g.createLinearGradient(ex - 12, ey - 12, ex + 12, ey + 12); pl.addColorStop(0, '#e8c23a'); pl.addColorStop(1, '#8a6a12');
+    g.fillStyle = pl; g.fillRect(ex - 12, ey - 12, 24, 24);
+    g.fillStyle = 'rgba(0,0,0,0.25)'; for (const [sx, sy] of [[-10, -10], [10, -10], [-10, 10], [10, 10]]) { g.beginPath(); g.arc(ex + sx, ey + sy, 0.9, 0, 7); g.fill(); }
+    // collerette
+    g.fillStyle = '#1a1a1e'; g.beginPath(); g.arc(ex, ey, 9, 0, 7); g.fill();
+    g.fillStyle = '#3a3a40'; g.beginPath(); g.arc(ex, ey, 8, 0, 7); g.fill();
+    // champignon : plus petit et plus sombre quand il est enfoncé
+    const r = pressed ? 6.2 : 7.2, oy = pressed ? 0.6 : -0.6;
+    if (!pressed) { g.fillStyle = 'rgba(0,0,0,0.5)'; g.beginPath(); g.ellipse(ex + 0.8, ey + 1.5, r, r * 0.9, 0, 0, 7); g.fill(); }
+    const mg2 = g.createRadialGradient(ex - 2.2, ey + oy - 2.4, 0.4, ex, ey + oy, r);
+    mg2.addColorStop(0, pressed ? '#ff8a7a' : '#ffb0a0'); mg2.addColorStop(0.35, pressed ? '#b0180e' : '#e0251a'); mg2.addColorStop(1, '#5a0806');
+    g.fillStyle = mg2; g.beginPath(); g.arc(ex, ey + oy, r, 0, 7); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(ex - 2.2, ey + oy - 2.8, 2.4, 1.3, -0.5, 0, 7); g.fill();   // reflet
+    sans('B', ex, ey + oy + 2, 5.5, 'rgba(255,230,220,0.85)', 'center', 0, true);
+    if (e && !e.stopT) glow(ex, ey, 12 + 10 * e.p, '255,40,30', 0.25 + 0.45 * e.p);   // freinage en cours : rougeoie selon la force
+    else if (wzWait && blink) { g.strokeStyle = '#9aff6a'; g.lineWidth = 1; g.beginPath(); g.arc(ex, ey, 11, 0, 7); g.stroke(); }
+    sans('URGENCE', ex, cy + 14.5, 4, e && !e.stopT ? '#ff6b5b' : '#8a909c', 'center', 0, !!(e && !e.stopT));
+  }
+
   // éclairage de cabine : légère teinte chaude commune à toute la console
   const wl = g.createLinearGradient(0, C0, 0, H); wl.addColorStop(0, 'rgba(255,175,105,0.07)'); wl.addColorStop(1, 'rgba(255,160,90,0.025)');
   g.fillStyle = wl; g.fillRect(0, C0, W, H - C0);
@@ -397,52 +422,6 @@ function drawGauge() {
   else if (kmh >= vt - 8) { label = 'BONNE VITESSE'; col = '#7dff8a'; }
   else { label = 'ACCÉLÉREZ'; col = '#ffd75e'; }
   if (label !== 'FREINEZ !' || Math.floor(S.t * 6) % 2) txt(label, bx + bw - 4, by + 9, 10, col, 'right', 'VT323', 70);
-}
-
-const centerX = () => S.mode === 'running' && S.phase !== 'drive' ? Math.round((131 + W - 4) / 2) : W / 2;   // à quai : à droite du plan de ligne
-// petit diagnostic de l'approche : où la trace sort de la zone idéale
-function curveVerdict(tr) {
-  let fast = 0, slow = 0, re = 0, prevV = null;
-  tr.forEach(([d, v]) => {
-    if (d < 10 || d > CURVE_D) return;
-    const vt = targetKmh(d);
-    if (v > vt + 1.5) fast++; else if (v < vt - 8) slow++;
-    if (prevV !== null && v > prevV + 0.3 && d < 40) re++;
-    prevV = v;
-  });
-  const n = Math.max(1, tr.filter(([d]) => d >= 10).length);
-  if (fast / n > 0.15) return 'freinage trop tardif';
-  if (re > 3) return 'réaccélérations à l\'approche';
-  if (slow / n > 0.35) return 'approche trop lente';
-  return 'approche régulière ✓';
-}
-function drawFx() {
-  const f = S.fx; if (!f || f.t > 5) return;
-  const cx = centerX();
-  const a = Math.min(1, (5 - f.t) * 2.5);
-  const pop = 1 + 0.5 * Math.max(0, 1 - f.t * 5);
-  g.globalAlpha = a;
-  const size = Math.round(30 * pop);
-  g.font = `${size}px VT323, monospace`; g.textAlign = 'center';
-  g.fillStyle = '#000'; g.fillText(f.gr.t, cx + 2, 78 + 2);
-  g.fillStyle = f.gr.c; g.fillText(f.gr.t, cx, 78);
-  if (f.prec !== undefined) {
-    const x = cx - 100, y = 84, w = 200;
-    const ontime = Math.abs(f.dt) <= 2;
-    const rows = [
-      [(f.stars.p ? '★ ' : '☆ ') + `Arrêt à ${f.ae.toFixed(1)} m ${f.err < 0 ? 'avant' : 'après'} la marque`, f.stars.p ? '#ffd75e' : '#cfd6e6'],
-      S.fire ? [f.gr.time[0], f.gr.time[1]] : [(f.stars.t ? '★ ' : '☆ ') + (ontime ? 'Pile à l\'heure !' : f.dt > 0 ? `Arrivé ${f.dt} s en retard` : `Arrivé ${-f.dt} s en avance`), f.stars.t ? '#ffd75e' : f.dt > 0 ? '#ff8a7a' : '#7fd4ff'],
-    ];
-    g.fillStyle = 'rgba(6,8,14,0.82)'; g.fillRect(x, y, w, 28); 
-    rows.forEach(([l, c], i) => txt(l, x + w / 2, y + 12 + i * 11, 12, c, 'center', 'VT323', w - 12));
-    // votre approche comparée à la courbe idéale
-    if (f.trace && f.trace.length > 2) {
-      drawCurve(x, y + 30, w, 36, f.trace, 1);
-      txt('VOTRE APPROCHE', x + 4, y + 38, 9, '#cfd6e6');
-      txt(curveVerdict(f.trace), x + w - 4, y + 38, 9, '#ffd75e', 'right', 'VT323', 120);
-    }
-  }
-  g.globalAlpha = 1;
 }
 
 function drawPops() {
@@ -753,8 +732,6 @@ function drawMsgs() {
   if (!S.msgs.length) return;
   const cctv = S.mode === 'running' && S.phase !== 'drive', drive = S.mode === 'running' && !cctv;
   let left = 30, right = W - 30, y0 = cctv ? CAM_Y0 + CAM_H - 5 : 14, bottom = false;
-  const fxOn = cctv && S.fx && S.fx.t < 5;
-  if (fxOn) { left = 131; right = W - 4; }   // bilan d'arrivée affiché : les messages passent au-dessus, sur les caméras
   if (drive && S.phase === 'drive') {
     // en conduite : en bas de la vue, pour laisser libres le tunnel et les signaux
     bottom = true;
@@ -779,7 +756,7 @@ function drawMsgs() {
     return { m, size, lines: lines.slice(0, 3), w, h: 3 + 10 * Math.min(3, lines.length) };
   });
   const total = cards.reduce((t, c) => t + c.h, 0) + 2 * (cards.length - 1);
-  let y = fxOn ? 52 - total : bottom ? VIEW_H - 4 - total : y0;
+  let y = bottom ? VIEW_H - 4 - total : y0;
   cards.forEach(c => {
     const m = c.m, x = Math.round(cx - c.w / 2);
     g.globalAlpha = Math.max(0, Math.min(1, (m.life - m.t) * 2, m.t * 8));
@@ -833,7 +810,7 @@ function drawHelp() {
       'Z : accélérer · S : freiner',
       'P : sonnerie · Entrée : fermer les portes',
       '← → : aiguillages · 1 à 5 : voitures',
-      ['#9aff6a', 'B : frein d\'urgence (éjecte les zombies)'],
+      ['#9aff6a', 'B dans le rouge : arrache les zombies'],
       'Caméra arrière : 3 s après chaque départ.',
       'Pastille VAGUE DE FEU : distance au feu.',
       'Échap : pause · ? : cette aide',

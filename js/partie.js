@@ -18,18 +18,19 @@ function updateUnload(dt) {
   const tk = Math.floor(u.t * 18); if (u.n < u.tot && tk !== u.tick) { u.tick = tk; beep(1200 + 600 * u.n / Math.max(1, u.tot), 0.025, 'square', 0.02); }
   if (u.n >= u.tot && u.t > 1.2 && (!S.blast || S.blast.res)) {   // la note attend l'issue des portes blindées
     u.done = true; S.load = 0; S.cars = S.cars.map(() => 0); S.saved = u.tot;
-    u.lost = fireLostNow(); u.note = fireNote(u.tot, u.lost); S.endT = S.blast ? 3.5 : 7;   // mode feu : on laisse voir l'issue des portes, puis le bilan à l'écran de fin S.msgs = []; S.mp = S.mp.filter(m => m.st !== 'walk');
+    u.lost = fireLostNow(); u.note = fireNote(u.tot, u.lost); S.endT = S.blast ? 5.5 : 7;   // mode feu : on laisse voir l'issue des portes, puis le bilan à l'écran de fin S.msgs = []; S.mp = S.mp.filter(m => m.st !== 'walk');
     const good = u.note >= 12;
     (good ? [523, 659, 784, 1047, 1319] : [392, 330, 262]).forEach((f, i) => beep(f, good ? 0.18 : 0.3, 'square', 0.06, 0.5 + i * (good ? 0.1 : 0.2)));
   }
 }
 // ---- final du mode feu : les portes blindées de l'abri, fermées à la manivelle, en rythme ----
 // Les flèches montent vers la ligne cible (← ↓ ↑ → ou Q S Z D). Chaque flèche juste fait descendre les portes.
-// Il en faut BLAST_NEED avant que la vague n'arrive ; sinon le feu s'engouffre et emporte une partie des derniers voyageurs.
-const BLAST_NEED = 10, BLAST_TRAVEL = 1.3;
+// Il en faut b.need (plus il y a de temps, plus il y en a : la manœuvre dure jusqu'à l'arrivée du feu) ; sinon le feu s'engouffre et emporte une partie des derniers voyageurs.
+const BLAST_TRAVEL = 1.3;
+const blastNeed = T => Math.max(18, Math.min(32, Math.round(T * 1.35)));
 function startBlast() {
-  const T = Math.max(7, Math.min(14, fireEta()));   // l'avance prise sur la vague donne plus ou moins de temps
-  S.blast = { t: 0, T, fv: Math.max(1, fireGap()) / T, notes: [], next: 1.2, hits: 0, perf: 0, combo: 0, fb: null, fbT: 0, flash: 0, lane: [0, 0, 0, 0], res: null, rt: 0 };
+  const T = Math.max(13, Math.min(24, fireEta() * 1.6));   // l'avance prise sur la vague donne plus ou moins de temps
+  S.blast = { t: 0, T, need: blastNeed(T), fv: Math.max(1, fireGap()) / T, notes: [], next: 1.2, hits: 0, perf: 0, combo: 0, fb: null, fbT: 0, flash: 0, lane: [0, 0, 0, 0], res: null, rt: 0 };
   S.fire.v = S.blast.fv;   // les panneaux du feu affichent le vrai compte à rebours
   S.fx = null;              // pas de bilan d'arrêt par-dessus le final
   for (let i = 0; i < 3; i++) beep(330, 0.15, 'sawtooth', 0.05, i * 0.22);
@@ -37,7 +38,7 @@ function startBlast() {
 function updateBlast(dt) {
   const b = S.blast; if (!b || S.over) return;
   b.ang = (b.ang || 0) + ((b.hits * Math.PI / 2) - (b.ang || 0)) * Math.min(1, dt * 9);   // le volant tourne d'un quart de tour par flèche juste
-  b.dp = (b.dp || 0) + (Math.min(1, b.hits / BLAST_NEED) - (b.dp || 0)) * Math.min(1, dt * 6);   // les battants suivent
+  b.dp = (b.dp || 0) + (Math.min(1, b.hits / b.need) - (b.dp || 0)) * Math.min(1, dt * 6);   // les battants suivent
   if (b.res) { b.rt += dt; return; }
   b.t += dt; b.fbT = Math.max(0, b.fbT - dt); b.flash = Math.max(0, b.flash - dt); b.lane = b.lane.map(v => Math.max(0, v - dt));
   while (b.next < b.t + BLAST_TRAVEL + 0.2) { b.notes.push({ t: b.next, dir: DDR_DIRS[Math.floor(Math.random() * 4)], res: null }); b.next += pick([0.42, 0.5, 0.5, 0.6]); }
@@ -54,7 +55,7 @@ function blastHit(dir) {
     n.res = dt <= DDR_PERF ? 'perf' : 'good'; b.hits++; b.combo++; if (n.res === 'perf') b.perf++;
     b.fb = n.res === 'perf' ? 'PARFAIT !' : 'BIEN'; b.fbT = 0.45; S.score += n.res === 'perf' ? 10 : 5;
     beep(140 + 20 * b.hits, 0.12, 'square', 0.08); noise(0.15, 0.2, 'lowpass', 600, 0.8);   // la manivelle cogne, les portes descendent
-    if (b.hits >= BLAST_NEED) blastResolve(true);
+    if (b.hits >= b.need) blastResolve(true);
   } else { b.combo = 0; b.flash = 0.25; b.fb = 'TROP TÔT'; b.fbT = 0.35; beep(180, 0.08, 'square', 0.04); }
 }
 function blastResolve(ok) {
@@ -67,7 +68,7 @@ function blastResolve(ok) {
     beep(70, 0.5, 'triangle', 0.4); noise(0.6, 0.4, 'lowpass', 500, 0.7);
   } else {
     // le feu s'engouffre : une partie des derniers voyageurs, encore près de l'entrée, est perdue (moins si les portes étaient presque fermées)
-    const prog = b.hits / BLAST_NEED, k = Math.round(u.tot * 0.5 * (1 - prog));
+    const prog = b.hits / b.need, k = Math.round(u.tot * 0.5 * (1 - prog));
     const fromOn = Math.min(k, S.load), fromOff = k - fromOn;   // d'abord ceux encore à bord, puis ceux déjà descendus
     S.load -= fromOn; u.tot -= k; if (u.n > u.tot) { S.score -= 10 * (u.n - u.tot); u.n = u.tot; }
     S.saved = Math.min(S.saved, u.tot); S.lost += k; S.fire.safe = true; S.shake = 0.8;
@@ -142,7 +143,7 @@ function drawBlastScene() {
 function drawBlast() {
   const b = S.blast; if (!b || b.res || S.mode !== 'running' || S.over) return;   // une fois l'issue connue, place au bilan
   const x = W - 126, y = 22, w = 122, h = 120, lw = 26, x0 = x + (w - lw * 4) / 2, top = y + 26, bot = y + h - 4, ty = top + 9;
-  const prog = Math.min(1, b.hits / BLAST_NEED), left = Math.max(0, b.T - b.t);
+  const prog = Math.min(1, b.hits / b.need), left = Math.max(0, b.T - b.t);
   g.fillStyle = b.flash ? 'rgba(90,10,10,0.9)' : 'rgba(6,8,14,0.9)'; g.fillRect(x, y, w, h);
   g.strokeStyle = b.res === 'ok' ? '#7dff8a' : b.res === 'fail' ? '#ff4a3a' : '#ffb35e'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   txt('PORTES BLINDÉES', x + 6, y + 9, 10, '#ffd75e');
@@ -161,7 +162,7 @@ function drawBlast() {
     ddrArrow(x0 + lw * DDR_DIRS.indexOf(n.dir) + lw / 2, ty + k * (bot - ty), 8, n.dir, n.res === 'miss' ? 'rgba(120,120,130,0.6)' : COL[n.dir], '#ffffff');
   }
   if (b.fbT > 0) txt(b.fb, x + w / 2, ty + 26, 9, b.fb === 'PARFAIT !' ? '#7dff8a' : b.fb === 'BIEN' ? '#9fe0ff' : '#ff6b5b', 'center', '"Press Start 2P"');
-  txt(`${b.hits} / ${BLAST_NEED}`, x + w - 6, bot - 2, 9, '#e6ecf5', 'right');
+  txt(`${b.hits} / ${b.need}`, x + w - 6, bot - 2, 9, '#e6ecf5', 'right');
 }
 function drawUnload() {
   const u = S.unload; if (!u || S.mode !== 'running' || S.over) return;
@@ -283,7 +284,7 @@ function update(dt) {
     if (S.phase === 'drive' && !S.ebrake) a += (2.4 - 0.8 * S.v / VMAX) * tractionF();   // traction : forte au démarrage, un peu moins à pleine vitesse (fuite : alourdie par la charge)
     else if (S.warnT <= 0) { msg('Fermez d\'abord les portes !', '#ff6b5b'); S.warnT = 2; }
   }
-  if (S.eb && !S.eb.stopT) a = -EB_DEC;   // frein d'urgence : il l'emporte sur tout
+  if (S.eb && !S.eb.stopT) a = -ebDec();   // frein d'urgence : il l'emporte sur tout
   else if (B) a -= BRAKE_MAX * S.brakeF;
   a -= 0.02 + 0.0004 * S.v * S.v;
   S.v = Math.min(VMAX, Math.max(0, S.v + a * dt));
