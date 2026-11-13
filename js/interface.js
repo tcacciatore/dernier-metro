@@ -226,7 +226,7 @@ function drawCab() {
     sans('PORTES', 290, cy + 12, 4.2, busy ? (blink ? '#ffb35e' : '#c08a4a') : '#8a909c', 'center', 0, busy);
   } else if (running && S.phase === 'drive' && S.sw && S.sw.kind === 'fork' && !S.sw.passed && !S.rev) {
     // sélecteur d'itinéraire : schéma de la bifurcation et deux boutons ← / →
-    const w = S.sw, dp = Math.max(0, Math.round(w.pos - S.pos)), ok = w.tgt === w.want, moving = w.fixT > 0, lock = w.pos - S.pos < (w.lock || SW_LOCK);
+    const w = S.sw, dp = Math.max(0, Math.round(w.pos - S.pos)), ok = w.tgt === w.want, moving = w.fixT > 0, lock = w.pos - S.pos < (FIRE() ? FIRE_LOCK : (w.lock || SW_LOCK));
     const mx0 = 178, mw = 60, my0 = IY + 1, mh = IH - 2;
     g.fillStyle = '#050608'; g.fillRect(mx0 - 1.5, my0 - 1.5, mw + 3, mh + 3);
     const lg = g.createLinearGradient(0, my0, 0, my0 + mh); lg.addColorStop(0, '#0f151a'); lg.addColorStop(1, '#090c10');
@@ -833,6 +833,7 @@ function drawHelp() {
       'Z : accélérer · S : freiner',
       'P : sonnerie · Entrée : fermer les portes',
       '← → : aiguillages · 1 à 5 : voitures',
+      ['#9aff6a', 'B : frein d\'urgence (éjecte les zombies)'],
       'Caméra arrière : 3 s après chaque départ.',
       'Pastille VAGUE DE FEU : distance au feu.',
       'Échap : pause · ? : cette aide',

@@ -390,11 +390,15 @@ function render() {
     drawScene(); drawTitle(); if (S.help) drawHelp(); return;
   }
   const shk = S.shake > 0 ? S.shake * 9 : 0;   // secousse au choc contre la barricade
-  if (shk) { g.save(); g.translate((Math.random() - 0.5) * shk, (Math.random() - 0.5) * shk); }
+  const pit = S.mode === 'running' ? ebPitch() : 0;   // frein d'urgence : la cabine plonge vers l'avant
+  const tr = shk || pit;
+  if (tr) { g.save(); g.translate((Math.random() - 0.5) * shk, (Math.random() - 0.5) * shk);
+    if (pit) { const cy = VIEW_H * 0.4, z = 1 + Math.abs(pit) * 0.004; g.translate(W / 2, cy + pit * 0.5); g.scale(z, z); g.translate(-W / 2, -cy); } }
   drawScene();
   drawDebris();
   if (S.mode === 'running' && S.phase === 'drive' || (S.wz && S.wz.length)) drawWindZombies();
-  if (shk) g.restore();
+  if (tr) g.restore();
+  if (S.mode === 'running') drawEmergencyBrake();
   drawFireGlow();
   drawGauge();
   const blastOn = S.mode === 'running' && S.phase !== 'drive' && S.blast;   // final des portes blindées : on n'est plus dans la rame

@@ -399,7 +399,7 @@ function drawIncidentBars() {
   if (dg && dg.seen && ['sit', 'trot', 'run'].includes(dg.state)) L.push(['CHIEN SUR LA VOIE · K', 1 - (dg.t || 0) / DOG_T, '#ffb35e']);
   if (pe && pe.seen && pe.state === 'track') L.push(['PERSONNE SUR LA VOIE · K', 1 - (pe.t || 0) / PERSON_T, '#ff4a3a']);
   const w = S.sw;
-  const nx = w && w.kind === 'fork' && w.tot && w.plan && w.plan[w.idx] && (w.passed || w.pos - S.pos < (w.lock || SW_LOCK)) ? w.plan[w.idx] : null;
+  const nx = w && w.kind === 'fork' && w.tot && w.plan && w.plan[w.idx] && (w.passed || w.pos - S.pos < (FIRE() ? FIRE_LOCK : (w.lock || SW_LOCK))) ? w.plan[w.idx] : null;
   if (nx) L.push([`AIGUILLE ${w.idx + 1}/${w.tot} · ${nx.want === 'D' ? '← DIRECT' : FIRE() ? '→ DÉVIÉ' : '→ DÉVIÉ 30'}${nx.set0 ? (nx.set0 === nx.want ? ' · tracé ✓' : ' · MAUVAISE DIRECTION') : ' · CHOISISSEZ !'}`, 1, nx.set0 === nx.want ? '#7dff8a' : (Math.floor(S.t * 4) % 2 ? '#ff6b5b' : '#ffd75e')]);   // la suivante, dès que la précédente est passée
   else if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / (w.fix || SW_FIX), '#ffd75e'] : [`${w.tot ? `AIGUILLE ${w.idx}/${w.tot}` : 'BIFURCATION'} · ${w.want === 'D' ? '← DIRECT' : FIRE() ? '→ DÉVIÉ' : '→ DÉVIÉ 30'}${w.plan && w.plan[w.idx] ? ` · puis ${w.plan[w.idx].want === 'D' ? '←' : '→'}` : ''}`, (w.pos - S.pos) / w.d0, w.tgt === w.want ? '#9fe0ff' : '#ff6b5b']);
   if (w && w.kind === 'merge' && w.eta !== null && swRed()) L.push(['TRAVERSÉE · cédez', (w.eta + 0.8 - S.clock) / (w.eta + 0.8 - w.start), '#ffd75e']);
@@ -417,16 +417,16 @@ function drawIncidentBars() {
   });
 }
 // ---------- Mode feu : zombies agrippés au pare-brise (en traversant une station infestée) ----------
-// Ils masquent la vue. Un coup de frein franc (S) ou un virage pris vite les décroche ; ceux qui restent
+// Ils masquent la vue. Le frein d'urgence (B) les projette tous ; un virage pris vite en décroche un ; ceux qui restent
 // jusqu'à la station suivante se faufilent dans la rame et contaminent des voyageurs.
 const WZ_SKIN = ['#7f9a6a', '#6e8a5c', '#8aa276', '#748f63'];
-function windZombiesJump(st) {
-  const kmh = S.v * 3.6, n = kmh >= 55 ? 1 : kmh >= 35 ? 2 : 3;
+function windZombiesJump(st, nForce) {
+  const kmh = S.v * 3.6, n = nForce || (kmh >= 55 ? 1 : kmh >= 35 ? 2 : 3);
   if (!S.wz) S.wz = [];
   const slots = [0.24, 0.5, 0.76].sort(() => Math.random() - 0.5);
   for (let i = 0; i < n; i++) S.wz.push({ x: W * slots[i] + (Math.random() - 0.5) * 30, y: VIEW_H - 40 - Math.random() * 30, s: 0.85 + Math.random() * 0.35,
     skin: pick(WZ_SKIN), ph: Math.random() * 6, t: 0, off: false, vx: 0, vy: 0, rot: 0, a: 1, land: 0.25 + i * 0.18 });
-  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Freinez franchement (S) pour ${n > 1 ? 'les' : 'le'} décrocher`, '#9aff6a', 3.5);
+  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Frein d'urgence (B) pour ${n > 1 ? 'les' : 'le'} projeter`, '#9aff6a', 3.5);
   noise(0.3, 0.35, 'lowpass', 300, 0.8); beep(90, 0.2, 'triangle', 0.25);
 }
 const wzOn = () => (S.wz || []).filter(z => !z.off);
@@ -443,6 +443,7 @@ function updateWindZombies(dt) {
   // saut au milieu du quai d'une station infestée qu'on traverse
   const st = STATIONS[S.next];
   if (st && st.zombie && S.phase === 'drive' && !st.wzDone && S.v > 2 && S.pos > st.pos - PL * 0.5) { st.wzDone = true; windZombiesJump(st); }
+  if (S.wzPend && (S.wzPend.t -= dt) <= 0) { const n = S.wzPend.n; S.wzPend = null; if (S.phase === 'drive') windZombiesJump(null, n); }   // après une barricade
   if (S.smears) { S.smears.forEach(s => s.t += dt); S.smears = S.smears.filter(s => s.t < 18); }
   if (!S.wz || !S.wz.length) return;
   for (const z of S.wz) {
@@ -451,11 +452,66 @@ function updateWindZombies(dt) {
   }
   S.wz = S.wz.filter(z => !z.off || z.a > 0);
   if (S.phase !== 'drive') return;
-  // freinage franc : il faut serrer fort un instant pour qu'un zombie lâche prise
-  if (keyBrake() && S.brakeF > 0.8 && S.v * 3.6 > 15) { S.wzBrake = (S.wzBrake || 0) + dt; if (S.wzBrake > 0.35 && wzOn().length) { S.wzBrake = 0; wzDetach('brake'); } } else S.wzBrake = 0;
   // virage pris assez vite : la force centrifuge en arrache un de temps en temps
   const b = bendHere();
   if (b && S.v * 3.6 > 22 && wzOn().length) { S.wzBend = (S.wzBend || 0) + dt; if (S.wzBend > 1.1) { S.wzBend = 0; wzDetach('bend'); } } else S.wzBend = 0;
+}
+// frein d'urgence (B) : freinage très puissant (pas un arrêt net), la cabine plonge vers l'avant et l'écran tremble.
+// Au pic de la secousse, les zombies du pare-brise sont projetés, à condition d'aller assez vite.
+// Prix à payer : traction coupée jusqu'à l'arrêt, puis 2 s de réarmement, et la rame repart de zéro.
+const EB_DEC = 7, EB_REARM = 2, EB_EJECT = 20;   // m/s², s, km/h minimum pour éjecter
+function emergencyBrake() {
+  if (S.over || S.phase !== 'drive' || S.rev || S.backup || S.mg || S.blast || S.eb) return;
+  if (S.v < 0.5) { msg('Frein d\'urgence : la rame est déjà à l\'arrêt', '#ffb35e', 1.5); return; }
+  S.eb = { t: 0, kmh: S.v * 3.6, ejected: false, sp: [] };
+  noise(0.9, 0.45, 'highpass', 2800, 2); noise(0.4, 0.4, 'lowpass', 260, 0.8); beep(70, 0.25, 'square', 0.15);
+  if (!FIRE()) pen(-30, `Freinage d'urgence à ${Math.round(S.v * 3.6)} km/h : voyageurs bousculés`);
+}
+function updateEmergencyBrake(dt) {
+  const e = S.eb; if (!e) return;
+  e.t += dt;
+  // étincelles sous les roues, tant que la rame glisse
+  if (S.v > 0.5) for (let i = 0; i < 4; i++) { const sd = Math.random() < 0.5 ? -1 : 1;
+    e.sp.push({ x: W / 2 + sd * (W * 0.3 + Math.random() * 40), y: VIEW_H - 6, vx: sd * (60 + Math.random() * 160), vy: -40 - Math.random() * 170, t: 0 }); }
+  for (const p of e.sp) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; }
+  e.sp = e.sp.filter(p => p.t < 0.5);
+  if (S.v > 0.5) S.shake = Math.max(S.shake, 0.25 + Math.min(0.35, S.v / 60));
+  // le coup de frein : au bout de 0,3 s, assez violent pour arracher les zombies
+  if (!e.ejected && e.t >= 0.3) {
+    e.ejected = true;
+    const on = wzOn();
+    if (on.length && e.kmh >= EB_EJECT) {
+      if (!S.smears) S.smears = [];
+      for (const z of on) {   // projetés vers l'avant, dans le tunnel
+        z.off = true; z.vx = (z.x - W / 2) * 0.9 + (Math.random() - 0.5) * 90; z.vy = -300 - Math.random() * 140; z.rot = 0;
+        S.smears.push({ x: z.x, y: z.y - 20 * z.s, s: z.s, t: 0 });
+      }
+      S.score += 15 * on.length; S.shake = 0.8;
+      noise(0.3, 0.35, 'lowpass', 500, 0.8); beep(130, 0.15, 'sawtooth', 0.08);
+      msg(`🛑 FREIN D'URGENCE ! ${on.length} zombie${on.length > 1 ? 's projetés' : ' projeté'} (+${15 * on.length})`, '#7dff8a', 2.5);
+    } else if (on.length) msg(`Trop lent pour les arracher : il faut au moins ${EB_EJECT} km/h au coup de frein`, '#ff6b5b', 2.5);
+    else msg('🛑 FREIN D\'URGENCE', '#ffb35e', 1.5);
+  }
+  if (S.v <= 0.05 && !e.stopT) { e.stopT = e.t; S.ebT = EB_REARM; }
+  if (e.stopT && e.t - e.stopT > 0.6 && !e.sp.length) S.eb = null;
+}
+// plongée de la cabine vers l'avant : monte vite au coup de frein, retombe à l'arrêt (un petit rebond)
+function ebPitch() {
+  const e = S.eb; if (!e) return 0;
+  const up = Math.min(1, e.t / 0.18) * Math.min(1, e.kmh / 50) * 16;
+  if (!e.stopT) return up;
+  const k = e.t - e.stopT;
+  return up * Math.cos(k * 9) * Math.exp(-k * 5);
+}
+function drawEmergencyBrake() {
+  const e = S.eb; if (!e) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (const p of e.sp) { const a = 1 - p.t / 0.5; g.strokeStyle = `rgba(255,${190 + Math.random() * 60 | 0},90,${a})`; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025); g.stroke(); }
+  g.restore();
+  if (!e.stopT || e.t - e.stopT < 0.3) {   // voyant rouge qui clignote
+    if (Math.floor(e.t * 6) % 2 === 0) { g.fillStyle = 'rgba(255,40,30,0.12)'; g.fillRect(0, 0, W, VIEW_H); }
+  }
 }
 // à l'arrivée en station : ceux qui sont encore agrippés se faufilent dans la rame
 function windZombiesBoard() {

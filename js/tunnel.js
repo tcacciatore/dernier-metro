@@ -1,6 +1,7 @@
 // Dernier Métro · Défis de tunnel : aiguillages, grills, virages, barricade, aiguille en panne
 // ---------- Aiguillages : bifurcation, voie déviée, convergence, manœuvre manuelle ----------
 const SW_LEN = 34, SW_SIG = 8, SW_DEV = 30, SW_FIX = 3, SW_LOCK = 20;   // longueur de la branche visible, signal 8 m avant l'aiguille
+const FIRE_LOCK = 1.5;   // fuite : l'aiguille bascule instantanément, on peut la régler jusqu'au dernier moment
 const CH_GAP = 26, CH_FIX = 0.6, CH_LOCK = 10, CH_LEAD = 14, CH_STEP = 34 + 2 + CH_GAP + 6;   // grill d'aiguillages : la suivante 26 m après la tête de tunnel (≈ 68 m d'une aiguille à l'autre), manœuvre éclair, verrou tardif
 const swOff = (w, z) => {                                 // décalage latéral (vers la droite) de la branche au point z
   const u = w.kind === 'merge' ? (w.pos - z) / SW_LEN : (z - w.pos) / SW_LEN;
@@ -117,14 +118,15 @@ function dirName(k) { return k === 'D' ? `la voie DIRECTE (direction ${STATIONS[
 // sélecteur de direction en cabine : le conducteur commande l'aiguille avant de l'atteindre
 function chooseDir(k) {
   const w = S.sw;
-  // grill : aiguille courante verrouillée ou dépassée, on présélectionne la suivante
-  if (w && w.tot && w.chain > 0 && S.phase === 'drive' && !S.rev && (w.passed || w.pos - S.pos < (w.lock || SW_LOCK))) {
+  const lockD = w ? (FIRE() ? FIRE_LOCK : (w.lock || SW_LOCK)) : 0;
+  // grill : une fois l'aiguille courante dépassée (ou verrouillée), la touche règle la suivante
+  if (w && w.tot && w.chain > 0 && S.phase === 'drive' && !S.rev && (w.passed || w.pos - S.pos < lockD)) {
     if (S.swQueue !== k) { S.swQueue = k; w.plan[w.idx].set0 = k;   // l'aiguille suivante (déjà visible au bout du tube) bascule tout de suite
       beep(760, 0.05, 'square', 0.04); msg(`Aiguille ${w.idx + 1}/${w.tot} : ${k === 'D' ? '← DIRECT' : '→ DÉVIÉ'} tracé${k === w.plan[w.idx].want ? '' : ' (ce n\'est pas la bonne direction !)'}`, k === w.plan[w.idx].want ? '#7dff8a' : '#ff6b5b', 1.5); }
     return true;
   }
   if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return false;
-  if (w.pos - S.pos < (w.lock || SW_LOCK)) { msg('Aiguille verrouillée : la rame est trop près', '#ff6b5b', 2); beep(220, 0.15, 'square', 0.04); return true; }
+  if (w.pos - S.pos < lockD) { msg('Aiguille verrouillée : la rame est trop près', '#ff6b5b', 2); beep(220, 0.15, 'square', 0.04); return true; }
   if (k === w.tgt) { beep(990, 0.05, 'sine', 0.04); return true; }
   if (FIRE()) {   // fuite : l'aiguille bascule tout de suite, le signal ne repasse pas au rouge (on peut changer d'avis jusqu'au verrou)
     w.tgt = w.set = k; w.fixT = 0; w.chose = true; S.vacAlert = 0; S.vacT = Math.max(S.vacT, 20);
@@ -231,6 +233,7 @@ function updateBarricade(dt) {
     if (kmh >= b.need) {   // pulvérisée
       b.broken = true; S.v *= 0.72; S.score += 60; S.shake = 0.6;
       msg(`💥 BARRICADE PULVÉRISÉE à ${Math.round(kmh)} km/h ! (+60)`, '#7dff8a', 3);
+      S.wzPend = { t: 0.35, n: Math.random() < 0.5 ? 1 : 2 };   // des gardes de la barricade s'agrippent au pare-brise
       noise(0.7, 0.5, 'lowpass', 900, 0.6); beep(70, 0.35, 'triangle', 0.35); noise(0.4, 0.25, 'bandpass', 2500, 3, 0.05);
       S.debris = [];
       for (let i = 0; i < 46; i++) { const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 200; S.debris.push({ x: W / 2 + (Math.random() - 0.5) * 120, y: 70 + Math.random() * 60, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120, r: Math.random() * 6, vr: (Math.random() - 0.5) * 14, w: 4 + Math.random() * 14, h: 2 + Math.random() * 3, c: pick(['#8a5a2a', '#a8723a', '#6a4220', '#c08850']), t: 0 }); }

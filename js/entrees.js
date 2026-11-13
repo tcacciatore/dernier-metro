@@ -49,6 +49,7 @@ addEventListener('keydown', e => {
   if (S.mg && k !== 'escape') { if (!e.repeat) mgHit({ arrowleft: 'L', q: 'L', arrowdown: 'D', s: 'D', arrowup: 'U', z: 'U', arrowright: 'R', d: 'R' }[k]); return; }
   if (k === 'e' && !e.repeat && S.mode === 'running') { if (canManual()) startManual(); else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') msg(S.v > 0 ? 'Arrêtez d\'abord la rame' : 'Approchez-vous du signal de l\'aiguille', '#ffd75e', 2); return; }
   if ((k === 'arrowleft' || k === 'arrowright') && S.mode === 'running') { chooseDir(k === 'arrowleft' ? 'D' : 'G'); return; }
+  if (k === 'b' && !e.repeat && S.mode === 'running') { emergencyBrake(); return; }
   if (k === ' ') { vacmaAck(); return; }
   if (k === 'k' && FIRE()) return;   // fuite : pas de klaxon
   if (k === 'k') {

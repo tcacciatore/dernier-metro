@@ -275,12 +275,16 @@ function update(dt) {
   S.brakeF = kS ? Math.min(1, Math.max(0.2, S.brakeF + dt / 0.3)) : 0;   // serre en 0,3 s
   const Z = kZ && !kS, B = kS;
   let a = 0;
-  if (Z && (S.mg || S.rev || S.backup)) { if (S.warnT <= 0) { msg(S.mg ? 'Terminez la manœuvre de l\'aiguille d\'abord' : 'Retour en marche arrière en cours…', '#ffb35e'); S.warnT = 2; } }
+  if (S.ebT > 0) S.ebT = Math.max(0, S.ebT - dt);
+  if (Z && S.ebT > 0) { if (S.warnT <= 0) { msg('Frein d\'urgence : réarmement en cours…', '#ffb35e'); S.warnT = 1; } }
+  else if (Z && (S.mg || S.rev || S.backup)) { if (S.warnT <= 0) { msg(S.mg ? 'Terminez la manœuvre de l\'aiguille d\'abord' : 'Retour en marche arrière en cours…', '#ffb35e'); S.warnT = 2; } }
+  else if (Z && S.eb) { if (S.warnT <= 0) { msg('Frein d\'urgence serré : traction coupée jusqu\'à l\'arrêt', '#ffb35e'); S.warnT = 1.5; } }
   else if (Z) {
     if (S.phase === 'drive' && !S.ebrake) a += (2.4 - 0.8 * S.v / VMAX) * tractionF();   // traction : forte au démarrage, un peu moins à pleine vitesse (fuite : alourdie par la charge)
     else if (S.warnT <= 0) { msg('Fermez d\'abord les portes !', '#ff6b5b'); S.warnT = 2; }
   }
-  if (B) a -= BRAKE_MAX * S.brakeF;
+  if (S.eb && !S.eb.stopT) a = -EB_DEC;   // frein d'urgence : il l'emporte sur tout
+  else if (B) a -= BRAKE_MAX * S.brakeF;
   a -= 0.02 + 0.0004 * S.v * S.v;
   S.v = Math.min(VMAX, Math.max(0, S.v + a * dt));
   S.pos += S.v * dt;
@@ -423,7 +427,7 @@ function update(dt) {
 
   updateBlast(dt);
   updateUnload(dt);
-  updateWindZombies(dt);
+  updateWindZombies(dt); updateEmergencyBrake(dt);
   if (S.mode === 'running') updateDebris(dt);
   if (S.endT > 0) { S.endT -= dt; if (S.endT <= 0) finish(); }
 
