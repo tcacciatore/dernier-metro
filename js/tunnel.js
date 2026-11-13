@@ -32,6 +32,10 @@ function swGhost() {
 }
 function swView() {
   const w = S.sw; if (!w || w.kind !== 'fork' || S.mode !== 'running') return null;
+  if (w.y) {   // Y : la salle est centrée, les deux branches s'écartent de BR/2 de part et d'autre
+    const zB = zBof(w), setG = w.set === 'G', onBr = w.passed && !!w.set && S.pos > w.pos, camX = onBr ? (setG ? 1 : -1) * brOff(w, S.pos) / 2 : 0;
+    return { zB, onBr, setG, y: true, a: -camX, b: (setG ? BR / 2 : -BR / 2) - camX };
+  }
   const zB = zBof(w), onBr = w.passed && w.set === 'G' && S.pos > w.pos, setG = w.set === 'G';
   const camX = onBr ? brOff(w, S.pos) : 0;
   // au-delà de la tête, le monde est aligné sur le tube choisi (pas de saut quand on franchit l'aiguille)
@@ -39,22 +43,23 @@ function swView() {
 }
 function chamberSlice(w, p0, d0, d1) {
   const yf = -2, full = p0 - S.pos >= NEAR, { f, w: wm } = tunnelLight(p0 + 1, d0);
-  const e0 = chamberE(w, p0), e1 = chamberE(w, p0 + STEP), A = chamberProf(e0), B = chamberProf(e1);
+  const e0 = chamberE(w, p0), e1 = chamberE(w, p0 + STEP), s0 = w.y ? e0 / 2 : 0, s1 = w.y ? e1 / 2 : 0, sm = (s0 + s1) / 2;   // Y : salle centrée
+  const A = chamberProf(e0).map(([x, y]) => [x - s0, y]), B = chamberProf(e1).map(([x, y]) => [x - s1, y]), afterY = w.y && p0 >= w.pos;
   for (let i = 0; i < A.length - 1; i++) {
     const n = 0.93 + 0.1 * hsh(p0, i);
     poly([[A[i][0], A[i][1], d0], [A[i + 1][0], A[i + 1][1], d0], [B[i + 1][0], B[i + 1][1], d1], [B[i][0], B[i][1], d1]], tl(C.tWall, f * T_SHADE[i] * n, wm * T_SHADE[i]));
   }
   if (full) for (let i = 0; i < A.length - 1; i++) poly([[A[i][0], A[i][1], d0], [A[i + 1][0], A[i + 1][1], d0], [A[i + 1][0], A[i + 1][1], d0 + 0.06], [A[i][0], A[i][1], d0 + 0.06]], tl(C.tWall, f * T_SHADE[i] * 0.62, wm * 0.5));
-  poly([[-2.3, yf, d1], [2.3 + e1, yf, d1], [2.3 + e0, yf, d0], [-2.3, yf, d0]], tl(C.ballast, f * 0.92, wm * 0.6));
-  poly([[-0.12, yf + 0.002, d1], [0.12, yf + 0.002, d1], [0.12, yf + 0.002, d0], [-0.12, yf + 0.002, d0]], tl([22, 22, 26], f, 0));
+  poly([[-2.3 - s1, yf, d1], [2.3 + e1 - s1, yf, d1], [2.3 + e0 - s0, yf, d0], [-2.3 - s0, yf, d0]], tl(C.ballast, f * 0.92, wm * 0.6));
+  if (!afterY) poly([[-0.12, yf + 0.002, d1], [0.12, yf + 0.002, d1], [0.12, yf + 0.002, d0], [-0.12, yf + 0.002, d0]], tl([22, 22, 26], f, 0));
   if (d0 < 34) poly([[-1.4, yf + 0.25, d1], [1.4, yf + 0.25, d1], [1.4, yf + 0.25, d0], [-1.4, yf + 0.25, d0]], `rgba(255,236,190,${(0.12 * (1 - d0 / 34)).toFixed(3)})`);
   brakeZone(p0, d0, f, yf);
-  track(p0, d0, d1, f, yf);
-  poly([[-2.3, -1.75, d1], [-1.7, -1.75, d1], [-1.7, -1.75, d0], [-2.3, -1.75, d0]], tl([74, 70, 74], f, wm));
-  face([-1.7, -1.75], [-1.7, yf], d0, d1, tl([48, 46, 50], f, wm * 0.5));
+  if (!afterY) track(p0, d0, d1, f, yf);   // Y : après l'aiguille, les rails sont ceux des deux branches
+  poly([[-2.3 - s1, -1.75, d1], [-1.7 - s1, -1.75, d1], [-1.7 - s0, -1.75, d0], [-2.3 - s0, -1.75, d0]], tl([74, 70, 74], f, wm));
+  face([-1.7 - sm, -1.75], [-1.7 - sm, yf], d0, d1, tl([48, 46, 50], f, wm * 0.5));
   if (full && ((p0 % 8) + 8) % 8 === 0 && e0 > 1) {   // plafonniers de la salle
-    const yc = 0.4 + 1.7 + 0.25 * e0 - 0.08, [lx, ly] = P(e0 / 2, yc, d0 + 1);
-    poly([[e0 / 2 - 0.4, yc, d0 + 1.2], [e0 / 2 + 0.4, yc, d0 + 1.2], [e0 / 2 + 0.4, yc, d0 + 0.8], [e0 / 2 - 0.4, yc, d0 + 0.8]], '#ffe6b0');
+    const cxl = e0 / 2 - s0, yc = 0.4 + 1.7 + 0.25 * e0 - 0.08, [lx, ly] = P(cxl, yc, d0 + 1);
+    poly([[cxl - 0.4, yc, d0 + 1.2], [cxl + 0.4, yc, d0 + 1.2], [cxl + 0.4, yc, d0 + 0.8], [cxl - 0.4, yc, d0 + 0.8]], '#ffe6b0');
     glow(lx, ly, Math.min(70, 2.6 * F / (d0 + 1)), '255,205,120', 0.32);
   }
 }
@@ -83,7 +88,8 @@ function drawBarrier(x, d) {
 function drawHeadwall(w, d, SV = swView()) {
   if (!SV) return;
   const f = Math.max(0.12, tunnelLight(SV.zB, d).f);
-  const out = chamberProf(BR), main = T_PROF, br = T_PROF.map(([x, y]) => [x + BR, y]);
+  const sY = w.y ? BR / 2 : 0, xD = -sY, xG = BR - sY;   // Y : tubes à −BR/2 et +BR/2
+  const out = chamberProf(BR).map(([x, y]) => [x - sY, y]), main = T_PROF.map(([x, y]) => [x + xD, y]), br = T_PROF.map(([x, y]) => [x + xG, y]);
   const path = pts => pts.forEach(([x, y], i) => { const [sx, sy] = P(x, y, d); i ? g.lineTo(sx, sy) : g.moveTo(sx, sy); });
   g.beginPath(); path(out); g.closePath(); path(main); g.closePath(); path(br); g.closePath();
   g.fillStyle = tl(C.tWall, f * 0.95, 0); g.fill('evenodd');
@@ -91,13 +97,13 @@ function drawHeadwall(w, d, SV = swView()) {
   g.beginPath(); path(hole); g.closePath(); g.fillStyle = '#030305'; g.fill();
   for (const h of [main, br]) { g.beginPath(); path(h); g.strokeStyle = tl(C.tWall, Math.min(1, f * 1.35), 0); g.lineWidth = Math.max(0.6, 0.12 * F / d); g.stroke(); }
   // plaques lumineuses au-dessus des deux tubes : flèche verte sur la voie demandée, croix rouge sur l'autre
-  for (const [x, k, lab] of [[0, 'D', 'DIRECT'], [BR, 'G', 'DÉVIÉ']]) {
+  for (const [x, k, lab] of [[xD, 'D', swLab(w, 'D')], [xG, 'G', swLab(w, 'G')]]) {
     const good = w.want === k, y0 = 2.18, y1 = 2.9;
     poly([[x - 0.9, y0, d], [x + 0.9, y0, d], [x + 0.9, y1, d], [x - 0.9, y1, d]], '#0a0c10');
     poly([[x - 0.82, y0 + 0.07, d], [x + 0.82, y0 + 0.07, d], [x + 0.82, y1 - 0.07, d], [x - 0.82, y1 - 0.07, d]], good ? '#0f4a22' : '#4a1210');
     const c = good ? '#7dff8a' : '#ff4a3a', cyy = (y0 + y1) / 2;
     if (good) {   // flèche (droite pour DIRECT, oblique pour DÉVIÉ)
-      const t = k === 'D' ? 0 : 0.6, q = (u, v) => [x + u * Math.cos(t) + v * Math.sin(t), cyy + v * Math.cos(t) - u * Math.sin(t), d];
+      const t = k === 'D' ? (w.y ? -0.6 : 0) : 0.6, q = (u, v) => [x + u * Math.cos(t) + v * Math.sin(t), cyy + v * Math.cos(t) - u * Math.sin(t), d];
       poly([q(-0.07, -0.26), q(0.07, -0.26), q(0.07, 0.08), q(-0.07, 0.08)], c);
       poly([q(-0.2, 0.06), q(0.2, 0.06), q(0, 0.3)], c);
     } else for (const sg of [1, -1]) poly([[x - 0.25, cyy - sg * 0.25, d], [x - 0.15, cyy - sg * 0.25, d], [x + 0.25, cyy + sg * 0.25, d], [x + 0.15, cyy + sg * 0.25, d]], c);
@@ -107,17 +113,26 @@ function drawHeadwall(w, d, SV = swView()) {
   }
   // barrière dans le tube non emprunté (sinon elle est dessinée dans le tube emprunté, plus loin)
   const notWant = w.want === 'D' ? 'br' : 'main', nonTaken = SV.setG ? 'main' : 'br';
-  if (notWant === nonTaken) drawBarrier(notWant === 'br' ? BR : 0, d + 6);
+  if (notWant === nonTaken) drawBarrier(notWant === 'br' ? xG : xD, d + 6);
 }
 // traversée : une voie oblique coupe la nôtre au point w.pos, de la gauche (près) vers la droite (loin)
 const XU = 8 / Math.hypot(8, 12), XZ = 12 / Math.hypot(8, 12), X_LEN = 30, X_V = 11, X_SC = 4 / XU;   // X_SC : abscisse du croisement
 const xPt = (w, s) => [-4 + XU * s, w.pos - 6 + XZ * s];
 const X_IN = (4 - 2.29) / XU, X_OUT = (4 + 2.29) / XU;               // entrée / sortie entre les piédroits
 const X_CLEAR = X_SC + 2.7 / XU + X_LEN;                              // la queue a dégagé notre voie
-function dirName(k) { return k === 'D' ? `la voie DIRECTE (direction ${STATIONS[STATIONS.length - 1].name})` : FIRE() ? 'la voie DÉVIÉE' : 'la voie DÉVIÉE (30 km/h)'; }
+function dirName(k, w = S.sw) {
+  if (w && w.y) return `la branche ${k === 'D' ? 'GAUCHE' : 'DROITE'}${FIRE() ? '' : ' (30 km/h)'}`;
+  return k === 'D' ? `la voie DIRECTE (direction ${STATIONS[STATIONS.length - 1].name})` : FIRE() ? 'la voie DÉVIÉE' : 'la voie DÉVIÉE (30 km/h)';
+}
+// fourche en Y : deux branches symétriques, GAUCHE (← , code 'D') et DROITE (→ , code 'G'), sans voie directe
+const swLab = (w, k) => w && w.y ? (k === 'D' ? 'GAUCHE' : 'DROITE') : (k === 'D' ? 'DIRECT' : 'DÉVIÉ');
+const swKey = (w, k) => k === 'D' ? '← ' + swLab(w, k) : swLab(w, k) === 'DÉVIÉ' ? '→ DÉVIÉ' : '→ ' + swLab(w, k);
+const swSlow = (w, k) => !FIRE() && (k === 'G' || (w && w.y));   // branche limitée à 30 km/h
+const swWantTxt = w => swKey(w, w.want) + (swSlow(w, w.want) ? ' 30' : '');
 // sélecteur de direction en cabine : le conducteur commande l'aiguille avant de l'atteindre
 function chooseDir(k) {
   const w = S.sw;
+  S.swPress = { k, t: S.t };   // le bouton du pupitre s'enfonce
   const lockD = w ? (FIRE() ? FIRE_LOCK : (w.lock || SW_LOCK)) : 0;
   // grill : une fois l'aiguille courante dépassée (ou verrouillée), la touche règle la suivante
   if (w && w.tot && w.chain > 0 && S.phase === 'drive' && !S.rev && (w.passed || w.pos - S.pos < lockD)) {
@@ -135,7 +150,7 @@ function chooseDir(k) {
   }
   w.tgt = k; w.fixT = w.fix || SW_FIX; w.chose = true; S.vacAlert = 0; S.vacT = Math.max(S.vacT, 20);
   beep(700, 0.06, 'square', 0.04); noise(0.4, 0.1, 'bandpass', 500, 2);
-  if (!w.tot) msg(`Itinéraire commandé : ${k === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Aiguille en mouvement, signal fermé`, '#ffd75e', 2.5);
+  if (!w.tot) msg(`Itinéraire commandé : ${swLab(w, k)}. Aiguille en mouvement, signal fermé`, '#ffd75e', 2.5);
   return true;
 }
 function swRed() {
@@ -179,10 +194,12 @@ function planSwitch(cur, n, D, L) {
   }
   const dist = Math.round((pos - cur.pos) / 10) * 10;
   if (kind === 'fork') {
-    w.want = Math.random() < 0.45 ? 'G' : 'D';
+    S.forkN = (S.forkN || 0) + 1;
+    w.y = !(S.tuto >= 0) && Math.random() < 0.45;   // fourche en Y : gauche ou droite (pas pendant le tutoriel)
+    w.want = Math.random() < (w.y ? 0.5 : 0.45) ? 'G' : 'D';
     w.set = null; w.tgt = null; w.wrong0 = true;   // aucune direction tracée : au conducteur de choisir ← ou →
     w.chg = Math.random() < 0.3 && w.d0 > 230;
-    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : bifurcation à ${dist} m, prenez ${dirName(w.want)}. Choisissez la direction : ← direct, → dévié.`, '#9fe0ff', 6); }, 1500);
+    setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : ${w.y ? 'fourche en Y' : 'bifurcation'} à ${dist} m, prenez ${dirName(w.want)}. Choisissez la direction : ${w.y ? '← gauche, → droite' : '← direct, → dévié'}.`, '#9fe0ff', 6); }, 1500);
   } else if (kind === 'manual') {
     setTimeout(() => { if (S.sw === w && S.mode === 'running') msg(`📻 PCC : aiguille en panne à ${dist} m. Arrêtez-vous au signal : commande de secours, flèches en rythme.`, '#ffb35e', 6); }, 1500);
   }
@@ -504,18 +521,20 @@ function updateSwitch(dt) {
   const w = S.sw; if (!w || S.phase !== 'drive') return;
   const dp = w.sig - S.pos;
   if (w.kind === 'merge' && w.eta === null && dp < 190) {
-    w.eta = S.clock + dp / VMAX + 0.5 + Math.random() * 1.3; w.start = S.clock;   // le train traverse juste devant nous : il suffit d'ajuster l'allure, à peine
+    // calé sur notre allure réelle : à vitesse constante, on arriverait au signal avant qu'il ait dégagé, il faut ralentir pour le voir passer juste devant
+    const lead = FIRE() ? 1.5 + Math.random() * 1.5 : 2.5 + Math.random() * 2;
+    w.eta = S.clock + dp / Math.max(S.v, 6) + lead; w.start = S.clock;
     w.t0 = w.eta - X_CLEAR / X_V;
     msg('Signal jaune : un train va traverser votre voie. Laissez-le passer !', '#ffd75e', 3.5);
     beep(1250, 0.1, 'square', 0.04); beep(1250, 0.1, 'square', 0.04, 0.2);
   }
   if (w.kind === 'fork' && w.fixT > 0) {
     w.fixT -= dt;
-    if (w.fixT <= 0) { w.fixT = 0; w.set = w.tgt; if (!w.tot) msg(`Aiguille en position ${w.set === 'D' ? 'DIRECT' : 'DÉVIÉ'} : signal ouvert`, w.set === w.want ? '#7dff8a' : '#ffd75e', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
+    if (w.fixT <= 0) { w.fixT = 0; w.set = w.tgt; if (!w.tot) msg(`Aiguille en position ${swLab(w, w.set)} : signal ouvert`, w.set === w.want ? '#7dff8a' : '#ffd75e', 2.5); beep(880, 0.15, 'sine', 0.05); noise(0.3, 0.12, 'bandpass', 600, 2); }
   }
   if (w.kind === 'fork' && w.chg && !w.passed && w.pos - S.pos < 150 && w.pos - S.pos > 70) {   // le PCC change d'itinéraire en route
     w.chg = false; w.want = w.want === 'D' ? 'G' : 'D'; w.chgT = S.t;
-    msg(`📻 PCC : CHANGEMENT D'ITINÉRAIRE ! ${w.want === 'D' ? 'Voie déviée occupée' : 'Voie directe occupée'}, prenez ${dirName(w.want)}`, '#ffb35e', 5);
+    msg(`📻 PCC : CHANGEMENT D'ITINÉRAIRE ! ${w.y ? `Branche ${w.want === 'D' ? 'droite' : 'gauche'} occupée` : w.want === 'D' ? 'Voie déviée occupée' : 'Voie directe occupée'}, prenez ${dirName(w.want)}`, '#ffb35e', 5);
     for (let i = 0; i < 2; i++) beep(1250, 0.1, 'square', 0.05, i * 0.2);
   }
   if (!w.sigPassed && S.v === 0 && dp < 40 && (w.kind !== 'merge' || w.eta !== null)) w.stopped = true;
@@ -530,7 +549,7 @@ function updateSwitch(dt) {
     } else if (w.kind === 'merge' && !w.stopped) { S.score += 40; msg('Traversée bien anticipée, sans arrêt (+40)', '#7dff8a', 3); }
   }
   if (w.kind === 'fork') {
-    const inZ = w.set === 'G' && S.pos > w.pos - 3 && S.pos < w.pos + SW_DEV + 5;
+    const inZ = (w.set === 'G' || (w.y && w.set)) && S.pos > w.pos - 3 && S.pos < w.pos + SW_DEV + 5;
     if (inZ && !FIRE()) { S.limit = 30; w.limOn = true; } else if (w.limOn) { S.limit = 0; w.limOn = false; }
     if (!w.passed && S.pos > w.pos) {
       w.passed = true;
@@ -709,7 +728,24 @@ function swSprites(list) {
 function swSpritesW(w, L0, gh) {
   const yf = -2, list = { push: o => L0.push(gh ? Object.assign(o, { gh: true }) : o) };
   // branche déviée : rails et traverses qui s'écartent en S jusqu'à la tête des tubes
-  if (w.kind === 'fork') {
+  if (w.kind === 'fork' && w.y) {   // Y : deux branches qui s'écartent symétriquement
+    const zB = zBof(w);
+    for (let z = w.pos - 2; z < zB; z += 2) {
+      const d = z - S.pos; if (d < NEAR + 0.3 || d > DMAX) continue;
+      list.push({ d, cs: true, draw: dd => {
+        const d1 = dd + 2, f = Math.max(0.3, 1 - dd / 150);
+        for (const sg of [-1, 1]) {
+          const a = sg * brOff(w, z) / 2, b = sg * brOff(w, z + 2) / 2;
+          if (sg > 0 || Math.abs(a) > 0.75) for (const q of [0.1, 1.1]) poly([[a - 1.0, yf + 0.06, dd + q + 0.25], [a + 1.0, yf + 0.06, dd + q + 0.25], [a + 1.0, yf + 0.06, dd + q], [a - 1.0, yf + 0.06, dd + q]], sh([70, 60, 52], f));
+          for (const rx of [-0.72, 0.72]) poly([[rx + b - 0.06, yf + 0.14, d1], [rx + b + 0.06, yf + 0.14, d1], [rx + a + 0.06, yf + 0.14, dd], [rx + a - 0.06, yf + 0.14, dd]], sh([205, 210, 220], Math.max(f, 0.45)));
+        }
+      } });
+    }
+    const dB = zB - S.pos, SVw = swView();
+    if (dB > NEAR + 0.3 && dB < DMAX) list.push({ d: dB, cs: true, draw: dd => drawHeadwall(w, dd, SVw) });
+    const notWant = w.want === 'D' ? 'br' : 'main', taken = SVw && SVw.setG ? 'br' : 'main', dK = zB + 12 - S.pos;
+    if (notWant === taken && dK > NEAR + 0.3 && dK < DMAX) list.push({ d: dK, draw: dd => drawBarrier(0, dd) });
+  } else if (w.kind === 'fork') {
     const zB = zBof(w);
     for (let z = w.pos; z < zB; z += 2) {
       const d = z - S.pos; if (d < NEAR + 0.3 || d > DMAX) continue;
@@ -750,13 +786,14 @@ function swSpritesW(w, L0, gh) {
     g.fillStyle = '#08090c'; g.fillRect(X, Y, bw, bh);
     if (bw > 5 && w.fixT <= 0 && w.set) {
       const cx = X + bw / 2, cy = Y + bh / 2, r = bh * 0.32, lw = Math.max(1, bh * 0.1);
-      if (w.set === 'D') { seg(cx, cy + r, cx, cy - r, lw, '#ffffff'); seg(cx, cy - r, cx - r * 0.5, cy - r * 0.4, lw, '#ffffff'); seg(cx, cy - r, cx + r * 0.5, cy - r * 0.4, lw, '#ffffff'); }
+      if (w.set === 'D' && w.y) { seg(cx + r * 0.6, cy + r, cx - r * 0.6, cy - r * 0.7, lw, '#ffffff'); seg(cx - r * 0.6, cy - r * 0.7, cx, cy - r * 0.7, lw, '#ffffff'); seg(cx - r * 0.6, cy - r * 0.7, cx - r * 0.55, cy, lw, '#ffffff'); }
+      else if (w.set === 'D') { seg(cx, cy + r, cx, cy - r, lw, '#ffffff'); seg(cx, cy - r, cx - r * 0.5, cy - r * 0.4, lw, '#ffffff'); seg(cx, cy - r, cx + r * 0.5, cy - r * 0.4, lw, '#ffffff'); }
       else { seg(cx - r * 0.6, cy + r, cx + r * 0.6, cy - r * 0.7, lw, '#ffffff'); seg(cx + r * 0.6, cy - r * 0.7, cx, cy - r * 0.7, lw, '#ffffff'); seg(cx + r * 0.6, cy - r * 0.7, cx + r * 0.55, cy, lw, '#ffffff'); }
       glow(cx, cy, bh, '255,255,255', 0.15);
     }
   } });
   const dl = w.pos - 60 - S.pos;
-  if (!gh && !FIRE() && w.kind === 'fork' && w.set === 'G' && dl > NEAR + 0.3 && dl < DMAX) list.push({ d: dl, draw: d => {
+  if (!gh && !FIRE() && w.kind === 'fork' && (w.set === 'G' || (w.y && w.set)) && dl > NEAR + 0.3 && dl < DMAX) list.push({ d: dl, draw: d => {
     const [x0, y0] = P(-2.5, 0.2, d), [x1, y1] = P(-1.9, -0.4, d);
     g.fillStyle = '#111'; g.fillRect(Math.round(x0) - 1, Math.round(y0) - 1, Math.round(x1 - x0) + 2, Math.round(y1 - y0) + 2);
     g.fillStyle = '#ffd400'; g.fillRect(Math.round(x0), Math.round(y0), Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)));

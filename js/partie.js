@@ -242,7 +242,7 @@ function update(dt) {
     st.acc += dt * st.aff * PERIODS[PER].accMul * LN().acc * (FIRE() ? (here ? 1 : 0.13) : (here ? 0.8 : 0.07));   // à quai, des voyageurs descendent sans cesse des escaliers   // flux entrant : l'embarquement doit pouvoir le dépasser
     while (st.acc >= 1) {
       st.acc -= 1;
-      if (here) spawnArrival(st);
+      if (here) { if (!FIRE()) spawnArrival(st); else if (st.extra > 0) { st.extra--; spawnArrival(st); } }   // fuite : à quai, seulement le quota d'arrivées de cet arrêt
       else if (st.people.length < platCap(st)) st.people.push((st.zombie ? mkZombie : mkPerson)(st.pos - 68 + Math.random() * 70, 2.3 + Math.random() * 3.4));
     }
   });

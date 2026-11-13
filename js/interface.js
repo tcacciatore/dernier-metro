@@ -233,35 +233,57 @@ function drawCab() {
     g.fillStyle = lg; g.fillRect(mx0, my0, mw, mh);
     sans('ITINÉRAIRE', mx0 + 2, my0 + 5, 3.6, DIM); sans(`${dp} m`, mx0 + mw - 2, my0 + 5, 4, OFF, 'right', 0, true);
     // schéma : tronc commun, voie directe (tout droit) et voie déviée (à droite)
-    const fx = mx0 + 10, fy = my0 + 21, top = my0 + 8, bx = fx + 13;
+    const fx = w.y ? mx0 + 15 : mx0 + 10, fy = my0 + 21, top = my0 + 8, bx = w.y ? fx + 8 : fx + 13, dx = w.y ? fx - 8 : fx;   // Y : deux branches symétriques
     const setCol = moving ? (blink ? '#ffd75e' : '#6a5a20') : '#f2efe6', offCol = '#3a404a';
     const lineC = k => (moving ? w.tgt : w.set) === k ? setCol : offCol;
     g.lineCap = 'round';
     g.strokeStyle = setCol; g.lineWidth = 1.5; g.beginPath(); g.moveTo(fx, my0 + mh - 1); g.lineTo(fx, fy); g.stroke();
-    g.strokeStyle = lineC('D'); g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx, top); g.stroke();
+    g.strokeStyle = lineC('D'); g.beginPath(); g.moveTo(fx, fy); if (w.y) { g.quadraticCurveTo(fx, fy - 6, dx, top + 5); g.lineTo(dx, top); } else g.lineTo(fx, top); g.stroke();
     g.strokeStyle = lineC('G'); g.beginPath(); g.moveTo(fx, fy); g.quadraticCurveTo(fx, fy - 6, bx, top + 5); g.lineTo(bx, top); g.stroke();
     g.lineCap = 'butt';
     // bout de chaque voie : flèche verte (demandée) ou barrière rouge (fin de voie)
-    for (const [k, ex] of [['D', fx], ['G', bx]]) {
+    for (const [k, ex] of [['D', dx], ['G', bx]]) {
       if (k === w.want) { g.fillStyle = '#7dff8a'; g.beginPath(); g.moveTo(ex, top - 3.5); g.lineTo(ex - 2.4, top - 0.5); g.lineTo(ex + 2.4, top - 0.5); g.fill(); }
       else { g.fillStyle = '#ff3a2a'; g.fillRect(ex - 3, top - 2.6, 6, 1.6); g.fillStyle = '#ffffff'; g.fillRect(ex - 1, top - 2.6, 1, 1.6); g.fillRect(ex + 1, top - 2.6, 1, 1.6); }
     }
-    sans('PCC', mx0 + 29, my0 + 12, 3.6, DIM); sans(w.want === 'D' ? 'DIRECT' : FIRE() ? 'DÉVIÉ' : 'DÉVIÉ 30', mx0 + 29, my0 + 17, 4.6, '#7dff8a', 'left', mw - 30, true);
+    sans('PCC', mx0 + 29, my0 + 12, 3.6, DIM); sans(swLab(w, w.want) + (swSlow(w, w.want) ? ' 30' : ''), mx0 + 29, my0 + 17, 4.6, '#7dff8a', 'left', mw - 30, true);
     const [stT, stC] = moving ? ['EN MOUV.', '#ffd75e'] : lock ? ['VERROU', DIM] : ok ? ['OK', '#7dff8a'] : ['ERREUR !', blink ? '#ff6b5b' : '#7a2a26'];
     sans(stT, mx0 + 29, my0 + 24.5, 4.2, stC, 'left', mw - 30, true);
-    // boutons
-    const rb = (x, k, glyph, label) => {
-      const sel = w.tgt === k, good = k === w.want, col = sel ? (good ? '#3dff6a' : '#ff3a2a') : null, y = cy - 3, r = 6.2;
-      g.fillStyle = '#0a0b0e'; g.beginPath(); g.arc(x, y, r + 1.2, 0, 7); g.fill();
-      const bg = g.createRadialGradient(x - 1.5, y - 1.5, 0.5, x, y, r);
-      bg.addColorStop(0, sel ? '#ffffff' : '#5a5f6a'); bg.addColorStop(0.45, sel ? mute(col, 0.2) : '#2e323b'); bg.addColorStop(1, sel ? mute(col, 0.2) : '#1d2027');
-      g.fillStyle = bg; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
-      if (sel) glow(x, y, 13, good ? '61,255,106' : '255,58,42', 0.35);
-      if (!ok && good && !lock && blink) { g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + 2.2, 0, 7); g.stroke(); }
-      sans(glyph, x, y + 2.2, 6, sel ? '#111' : '#9aa1ae', 'center', 0, true);
-      sans(label, x, cy + 12, 4.2, sel ? '#ffffff' : '#8a909c', 'center', 0, sel);
+    // boutons-poussoirs lumineux d'itinéraire : boîtier métallique vissé, voyant carré gravé de la voie à prendre
+    const rb = (x, k, label) => {
+      const sel = w.tgt === k, good = k === w.want, mv = moving && sel, y = cy - 2.5;
+      const pr = S.swPress && S.swPress.k === k && S.t - S.swPress.t < 0.14, dy = pr ? 0.8 : 0;
+      const lit = sel && (!mv || blink), col = mv ? '#ffd75e' : good ? '#3dff6a' : '#ff3a2a';
+      // boîtier : feuillure sombre, cadre en acier brossé, quatre vis
+      g.fillStyle = '#060709'; g.fillRect(x - 12, y - 11, 24, 22);
+      const fr = g.createLinearGradient(x - 11, y - 10, x + 11, y + 10); fr.addColorStop(0, '#6a707c'); fr.addColorStop(0.5, '#3a3f49'); fr.addColorStop(1, '#1c1f25');
+      g.fillStyle = fr; g.fillRect(x - 11, y - 10, 22, 20);
+      g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(x - 11, y - 10, 22, 0.6);
+      g.fillStyle = '#14161a'; for (const [sx, sy] of [[-9, -8], [9, -8], [-9, 8], [9, 8]]) { g.beginPath(); g.arc(x + sx, y + sy, 0.9, 0, 7); g.fill(); }
+      // le poussoir : ombre portée quand il est sorti, il s'enfonce à l'appui
+      if (!pr) { g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x - 7, y - 6 + 1.2, 15, 13); }
+      const lx = x - 7.5, ly = y - 7 + dy, lw = 15, lh = 13;
+      const lg = g.createLinearGradient(0, ly, 0, ly + lh);
+      if (lit) { lg.addColorStop(0, '#ffffff'); lg.addColorStop(0.25, col); lg.addColorStop(1, mute(col, 0.45)); }
+      else { lg.addColorStop(0, pr ? '#22262c' : '#2c3038'); lg.addColorStop(1, '#121418'); }
+      g.fillStyle = lg; g.fillRect(lx, ly, lw, lh);
+      g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 0.8; g.strokeRect(lx, ly, lw, lh);
+      g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(lx + 1, ly + 1, 1.5, lh - 2);   // reflet du verre, sur le bord
+      // la flèche gravée : tout droit (direct) ou qui part sur la droite (dévié)
+      g.strokeStyle = lit ? 'rgba(10,20,10,0.85)' : '#5a606c'; g.fillStyle = g.strokeStyle; g.lineWidth = 1.6; g.lineCap = 'round';
+      const ax = x, by0 = ly + lh - 2.5;
+      g.beginPath();
+      if (k === 'D' && w.y) { g.moveTo(ax + 2.5, by0); g.lineTo(ax + 2.5, ly + 8); g.quadraticCurveTo(ax + 2.5, ly + 5, ax - 2, ly + 4.2); g.stroke();
+        g.beginPath(); g.moveTo(ax - 1, ly + 1.6); g.lineTo(ax - 5, ly + 3.6); g.lineTo(ax - 1.6, ly + 6.6); g.fill(); }
+      else if (k === 'D') { g.moveTo(ax, by0); g.lineTo(ax, ly + 4.5); g.stroke(); g.beginPath(); g.moveTo(ax - 2.6, ly + 5); g.lineTo(ax, ly + 2); g.lineTo(ax + 2.6, ly + 5); g.fill(); }
+      else { g.moveTo(ax - 2.5, by0); g.lineTo(ax - 2.5, ly + 8); g.quadraticCurveTo(ax - 2.5, ly + 5, ax + 2, ly + 4.2); g.stroke();
+        g.beginPath(); g.moveTo(ax + 1, ly + 1.6); g.lineTo(ax + 5, ly + 3.6); g.lineTo(ax + 1.6, ly + 6.6); g.fill(); }
+      g.lineCap = 'butt';
+      if (lit) glow(x, y, 15, [1, 3, 5].map(i => parseInt(col.slice(i, i + 2), 16)).join(','), 0.4);
+      if (!ok && good && !lock && blink) { g.strokeStyle = '#ffd75e'; g.lineWidth = 1; g.strokeRect(x - 13, y - 12, 26, 24); }   // celui-ci, vite !
+      sans(label, x, cy + 13.5, 3.9, sel ? '#ffffff' : '#8a909c', 'center', 0, sel);
     };
-    rb(260, 'D', '←', 'DIRECT'); rb(290, 'G', '→', 'DÉVIÉ');
+    rb(259, 'D', w.y ? '← GAUCHE' : '← DIRECT'); rb(287, 'G', w.y ? 'DROITE →' : 'DÉVIÉ →');
   } else {
   btn(190, 'PORTES', S.doors <= 0, '#3dff6a');
   btn(222, 'SONN.', S.buzzT > 0, '#ffd75e');

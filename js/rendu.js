@@ -759,6 +759,13 @@ function collectSprites() {
     }
   }
   if (S.mode === 'running' && S.gap > NEAR + 0.2 && S.gap < DMAX) list.push({ d: S.gap, draw: drawLeaderTail });
+  if (S.wzTrack && S.phase === 'drive') {   // zombies sur la voie, avant une station infestée : bras tendus vers la rame
+    const tr = S.wzTrack, dp = tr.pos - S.pos;
+    for (const z of tr.zs) { const dz = dp + z.lag; if (dz > NEAR + 0.3 && dz < DMAX) list.push({ d: dz, draw: d => { const [sx, sy] = P(z.x, -2, d); PL_F = Math.max(0.25, 1 - d / 150); PL_FOG = FOG_TUN; z.look.dir = 1; drawPerson(sx, sy, F / d, z.look, S.t * 2.2 + z.ph); PL_F = 1;
+      const k = F / d, hy = sy - k * (z.look.h || 1.7) * 0.9, a = 0.5 + 0.4 * Math.sin(S.t * 5 + z.ph);   // yeux qui luisent dans la pénombre
+      for (const ex of [-0.05, 0.05]) { g.fillStyle = `rgba(255,50,30,${a})`; g.fillRect(sx + ex * k - 0.6, hy - 0.6, Math.max(1.2, k * 0.03), Math.max(1.2, k * 0.03)); }
+      glow(sx, hy, Math.max(4, k * 0.25), '255,40,30', 0.25 * a); } }); }
+  }
   if (S.person && S.person.state !== 'safe') {
     const pe = S.person, dp = pe.pos - S.pos;
     if (dp > NEAR + 0.3 && dp < DMAX) list.push({ d: dp, draw: d => {

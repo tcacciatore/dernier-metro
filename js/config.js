@@ -2,7 +2,7 @@
 const cv = document.getElementById('c');
 const g = cv.getContext('2d');
 const W = 384, H = 216, VIEW_H = 170;
-const VERSION = 'v1.23 · inertie';
+const VERSION = 'v1.27 · quais finis (feu)';
 let RES = 2;
 
 // Remplit la fenêtre en gardant le 16:9, avec un facteur entier en pixels

@@ -4,6 +4,8 @@ function setupMirror(st) {
   if (!S.tipCars && S.tuto < 0 && STATIONS.indexOf(st) > 0 && STATIONS.indexOf(st) < STATIONS.length - 1) { S.tipCars = true; setTimeout(() => { if (S.mode === 'running' && S.phase !== 'drive') msg('Astuce : touches 1 à 5 pour fermer (ou rouvrir) les portes d\'une seule voiture. La touche est affichée en bas de chaque caméra.', '#ffd75e', 7); }, 1200); }
   S.mp = []; S.carShut = [false, false, false, false, false];
   const si = STATIONS.indexOf(st), last = si === STATIONS.length - 1;
+  // fuite : nombre fini d'arrivées pendant l'arrêt (en plus de ceux qui attendent déjà et des vagues de retardataires) : le quai finit par se vider
+  st.extra = Math.round((18 + Math.random() * 12) * st.aff * LN().acc);
   // descente : une part de la rame, plus forte dans les grosses stations, tout le monde au terminus
   if (last && FIRE()) {   // abri : un défilé de voyageurs à l'écran, le décompte exact est tenu par updateUnload
     const nv = Math.min(S.load, 80), step = unloadDur(S.load) / Math.max(1, Math.ceil(nv / DOORS.length));

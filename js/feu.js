@@ -401,7 +401,7 @@ function drawIncidentBars() {
   const w = S.sw;
   const nx = w && w.kind === 'fork' && w.tot && w.plan && w.plan[w.idx] && (w.passed || w.pos - S.pos < (FIRE() ? FIRE_LOCK : (w.lock || SW_LOCK))) ? w.plan[w.idx] : null;
   if (nx) L.push([`AIGUILLE ${w.idx + 1}/${w.tot} · ${nx.want === 'D' ? '← DIRECT' : FIRE() ? '→ DÉVIÉ' : '→ DÉVIÉ 30'}${nx.set0 ? (nx.set0 === nx.want ? ' · tracé ✓' : ' · MAUVAISE DIRECTION') : ' · CHOISISSEZ !'}`, 1, nx.set0 === nx.want ? '#7dff8a' : (Math.floor(S.t * 4) % 2 ? '#ff6b5b' : '#ffd75e')]);   // la suivante, dès que la précédente est passée
-  else if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / (w.fix || SW_FIX), '#ffd75e'] : [`${w.tot ? `AIGUILLE ${w.idx}/${w.tot}` : 'BIFURCATION'} · ${w.want === 'D' ? '← DIRECT' : FIRE() ? '→ DÉVIÉ' : '→ DÉVIÉ 30'}${w.plan && w.plan[w.idx] ? ` · puis ${w.plan[w.idx].want === 'D' ? '←' : '→'}` : ''}`, (w.pos - S.pos) / w.d0, w.tgt === w.want ? '#9fe0ff' : '#ff6b5b']);
+  else if (w && w.kind === 'fork' && !w.passed) L.push(w.fixT > 0 ? ['AIGUILLE EN MOUVEMENT', w.fixT / (w.fix || SW_FIX), '#ffd75e'] : [`${w.tot ? `AIGUILLE ${w.idx}/${w.tot}` : w.y ? 'FOURCHE EN Y' : 'BIFURCATION'} · ${w.tot ? (w.want === 'D' ? '← DIRECT' : FIRE() ? '→ DÉVIÉ' : '→ DÉVIÉ 30') : swWantTxt(w)}${w.plan && w.plan[w.idx] ? ` · puis ${w.plan[w.idx].want === 'D' ? '←' : '→'}` : ''}`, (w.pos - S.pos) / w.d0, w.tgt === w.want ? '#9fe0ff' : '#ff6b5b']);
   if (w && w.kind === 'merge' && w.eta !== null && swRed()) L.push(['TRAVERSÉE · cédez', (w.eta + 0.8 - S.clock) / (w.eta + 0.8 - w.start), '#ffd75e']);
   if (w && w.kind === 'manual' && !w.done) L.push([S.mg ? 'COMMANDE DE SECOURS' : 'AIGUILLE EN PANNE · ARRÊTEZ-VOUS', S.mg ? 1 - S.mg.hits / DDR_NEED : Math.max(0, (w.sig - S.pos) / w.d0), '#ff8a5b']);
   const bz = S.barr;
@@ -463,7 +463,17 @@ function updateWindZombies(dt) {
   if (!FIRE() || S.mode !== 'running') return;
   // saut au milieu du quai d'une station infestée qu'on traverse
   const st = STATIONS[S.next];
-  if (st && st.zombie && S.phase === 'drive' && !st.wzDone && S.v > 2 && S.pos > st.pos - PL * 0.5) { st.wzDone = true; windZombiesJump(st); }
+  // à l'approche d'une station infestée : trois zombies attendent sur la voie, avancent en titubant, puis sautent sur le pare-brise
+  if (st && st.zombie && S.phase === 'drive' && !st.wzDone && !S.rev) {
+    if (!S.wzTrack || S.wzTrack.st !== st) {
+      if (S.pos > st.pos - PL - 25 - 160) S.wzTrack = { st, pos: st.pos - PL - 25, seen: false, zs: [-0.65, 0.05, 0.7].map(x => ({ x: x + (Math.random() - 0.5) * 0.2, look: mkZombie(0, 0), ph: Math.random() * 6, lag: Math.random() * 1.5 })) };
+    } else {
+      const tr = S.wzTrack, dp = tr.pos - S.pos;
+      tr.pos -= 0.8 * dt;   // ils marchent vers la rame
+      if (!tr.seen && dp < 90) { tr.seen = true; msg('☣ Des zombies sur la voie ! Ils vont sauter sur le pare-brise', '#9aff6a', 3); noise(0.5, 0.2, 'lowpass', 300, 0.8); }
+      if (dp < 5) { st.wzDone = true; S.wzTrack = null; windZombiesJump(st, 3); }
+    }
+  }
   if (S.wzPend && (S.wzPend.t -= dt) <= 0) { const n = S.wzPend.n; S.wzPend = null; if (S.phase === 'drive') windZombiesJump(null, n); }   // après une barricade
   if (S.smears) { S.smears.forEach(s => s.t += dt); S.smears = S.smears.filter(s => s.t < 18); }
   // essuie-glace : le balai passe sur chaque zombie à l'aller
