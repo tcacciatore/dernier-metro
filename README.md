@@ -69,12 +69,17 @@ Il n'y a plus d'horaire ni de descente : les voyageurs montent, et le but est d'
 - **Rattrapé** : si la vague atteint l'arrière de la rame, c'est perdu. Elle accélère si vous la distancez trop : impossible de la semer.
 - **Foule** : toute la ville se réfugie dans le métro. Les quais sont bondés (jusqu'à 300 personnes), les renforts dévalent les escaliers par grosses vagues, et les voitures n'ont **aucune limite** : on s'entasse, seul le poids de la rame freine.
 - **Perdus** : les voyageurs laissés sur un quai sont perdus quand la vague l'atteint.
-- **Le poids** : chaque voyageur alourdit la rame. Plus elle est chargée, moins elle accélère (jusqu'à environ −50 %), et une rame mal répartie (une voiture bondée, une autre vide) perd encore jusqu'à 30 % de traction. La traction s'affiche sur le panneau à quai (⚙) et sous la pastille VAGUE DE FEU. Prendre 50 voyageurs de plus, c'est repartir plus lentement avec le feu derrière.
+- **Le poids** : chaque voyageur alourdit la rame. Plus elle est chargée, moins elle accélère (jusqu'à environ −50 %). La traction s'affiche sur le panneau à quai (⚙) et sous la pastille VAGUE DE FEU.
+- **La répartition compte** : une rame mal répartie (une voiture bien plus chargée que la moyenne) est pénalisée de trois façons :
+  - jusqu'à **−55 % de traction**, en plus du poids ;
+  - la montée **ralentit fortement** dans les voitures surchargées (« SURCHARGÉE » sur leur caméra) ;
+  - dans les virages, la rame penche et **déraille jusqu'à 6 km/h plus tôt**.
+  Un bandeau « RAME DÉSÉQUILIBRÉE » et un conseil indiquent la voiture à fermer (touches 1 à 5) pour envoyer la foule vers les autres. Partir avec une rame bien équilibrée rapporte +40.
 - **Stations infestées** ☣ : certaines stations ne contiennent que des zombies. Le PCC prévient au départ : **ne vous arrêtez pas**, traversez (+50). Si vous vous arrêtez, fermez les portes au plus vite : chaque zombie qui monte contamine 6 voyageurs.
 - **Virages dans chaque tunnel sans aiguillage**, avec leur limite (25 à 40 km/h, jamais plus lents que la vague) et le même profil de vitesse qu'en service normal. Seul le virage se négocie : en ligne droite, aucune limite, le profil n'est qu'un guide pour freiner à temps (on ne déraille qu'en entrant trop vite dans la courbe). Aux stations infestées, pas de courbe d'arrêt : on traverse.
 - **Défis de tunnel** : chaque tunnel a un seul défi, à parts égales : des virages, des aiguillages, ou une barricade. Les longs tunnels ont un grill d'aiguillages.
 - **Barricade de zombies** : une barricade en bois, gardée par des zombies, bloque le tunnel. Le PCC prévient au départ ; le bandeau donne la vitesse requise (60 km/h) et la vôtre. **Foncez à fond** : au-dessus de la vitesse requise, elle vole en éclats (+60). Trop lent : la rame rebondit et recule de 60 m pour reprendre de l'élan, mais la barricade est fissurée : plus le choc a été fort, moins il faudra de vitesse au coup suivant. Attention au poids : une rame bondée accélère mal et aura du mal à l'atteindre.
-- **Grill d'aiguillages** : certains tunnels, plus longs, enchaînent 5 à 7 aiguilles très rapprochées. Les aiguilles se suivent tous les ~60 m et chacune s'annonce au dernier moment (AIGUILLE 2/5 · → DÉVIÉ 30 · puis ←) : choisissez ← direct ou → dévié. La manœuvre est quasi instantanée mais l'aiguille se verrouille à 10 m ; dès qu'elle est verrouillée, ← / → **présélectionnent la suivante**, d'après le « puis » du bandeau. En mode feu, la voie déviée n'a pas de limite de vitesse : il suffit de choisir la bonne direction, et un tunnel à aiguillages n'a ni virage ni profil de vitesse. +25 par aiguille bien prise, +60 pour un grill sans faute ; une erreur oblige à reculer. Bifurcations et traversées restent présentes (pas d'aiguille à manœuvrer à pied).
+- **Grill d'aiguillages** : certains tunnels, plus longs, enchaînent 5 à 7 aiguilles très rapprochées. Les aiguilles se suivent tous les ~65 m et chacune s'annonce au dernier moment (AIGUILLE 2/5 · → DÉVIÉ 30 · puis ←) : choisissez ← direct ou → dévié. La manœuvre est quasi instantanée mais l'aiguille se verrouille à 10 m ; dès qu'une aiguille est passée (ou verrouillée), le bandeau annonce la suivante (« AIGUILLE 3/5 · → DÉVIÉ · CHOISISSEZ ! ») et ← / → la règlent tout de suite : il reste alors environ 4 secondes. Son signal, visible au bout du tube, est rouge tant qu'aucune direction n'est choisie ; le franchir déclenche un freinage d'urgence. En mode feu, la voie déviée n'a pas de limite de vitesse : il suffit de choisir la bonne direction, et un tunnel à aiguillages n'a ni virage ni profil de vitesse. +25 par aiguille bien prise, +60 pour un grill sans faute ; une erreur oblige à reculer. Bifurcations et traversées restent présentes (pas d'aiguille à manœuvrer à pied).
 - **Ni veille automatique ni klaxon** (et donc plus de chien sur la voie).
 - **Fin du monde, plus de service** : aucun incident voyageur (malaise, bagage, bagarre, pickpocket, fêtard, alarme, voyageur sur la voie), ni travaux ni régulation du PCC. Restent la foule de réfugiés, les coupures d'éclairage et les signaux.
 - Le feu se voit : boules de feu et fumée sur la caméra arrière, braises qui dépassent la rame, fumée sous la voûte, flammes au bas de l'écran quand il est tout près, et la rame engloutie si elle est rattrapée.
@@ -97,8 +102,30 @@ sont dans [`pubs/README.md`](pubs/README.md).
 
 ## Lancer en local
 
-Le jeu tient dans un seul fichier, `index.html`, sans dépendance.
-Ouvrez-le dans un navigateur, ou servez le dossier :
+Le jeu est en HTML et JavaScript, sans dépendance ni étape de construction :
+
+| Fichier | Contenu |
+|---|---|
+| `index.html` | la page : le canvas et la liste des scripts |
+| `css/style.css` | la mise en page et les polices |
+| `js/config.js` | constantes, données des lignes, profils de voyageurs |
+| `js/etat.js` | état de la partie, missions, barème et médailles |
+| `js/audio.js` | sons et musique |
+| `js/quai.js` | voyageurs, portes, montée et descente, remplissage des voitures |
+| `js/entrees.js` | clavier et pause |
+| `js/logique.js` | arrivée en station, tutoriels, horaire, train précédent, veille, game over |
+| `js/feu.js` | mode Vague de feu : la vague, la caméra arrière, les incidents de tunnel |
+| `js/tunnel.js` | défis de tunnel : aiguillages, grills, virages, barricade, aiguille en panne |
+| `js/partie.js` | abri du mode feu, fin de service, boucle de mise à jour |
+| `js/textures.js` | textures générées au démarrage : béton, carrelage, ballast, dallage |
+| `js/rendu.js` | rendu 3D du tunnel et des stations, voyageurs, publicités |
+| `js/cameras.js` | caméras de quai |
+| `js/interface.js` | pupitre, aide, messages, écrans de fin |
+| `js/accueil.js` | écran d'accueil et démarrage |
+
+Les scripts sont chargés dans cet ordre et partagent leurs variables. À chaque publication, augmentez le numéro `?v=` des liens dans `index.html` pour que les navigateurs rechargent les fichiers.
+
+Ouvrez `index.html` dans un navigateur, ou servez le dossier :
 
 ```bash
 python3 -m http.server 8000
