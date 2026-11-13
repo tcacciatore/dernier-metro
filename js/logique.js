@@ -1,6 +1,7 @@
 // Dernier Métro · Arrivée en station, tutoriels, horaire, train précédent, veille, game over
 // ---------- Logique ----------
 function arrive(st, err) {
+  windZombiesBoard();   // zombies encore agrippés au pare-brise : ils entrent dans la rame
   S.v = 0; S.cur = STATIONS.indexOf(st); S.next = S.cur + 1;
   const r = st.res; const dt = Math.round(S.entryDelta !== null ? S.entryDelta : S.clock - st.arr);   // horaire mesuré à l'entrée à quai
   r.dt = dt; r.err = err;
@@ -95,8 +96,9 @@ function arrive(st, err) {
   if (S.next < STATIONS.length) S.sigPos = null;
   if (S.next >= STATIONS.length && FIRE()) {
     S.saved = 0; S.endT = 99;   // la fin attend que tout le monde soit descendu
-    S.unload = { tot: S.load, n: 0, t: 0, done: false, dt: 0, rate: S.load / unloadDur(S.load), tick: -1 };
-    msg('Abri atteint ! Les portes blindées se ferment : tout le monde descend', '#7dff8a', 4);
+    S.unload = { tot: S.load, goal: S.load + fireLostNow(), n: 0, t: 0, done: false, dt: 0, rate: S.load / unloadDur(S.load), tick: -1 };   // goal : tous ceux qu'il fallait sauver (à bord + perdus)
+    startBlast();   // final : fermer les portes blindées de l'abri en rythme, avant que la vague n'arrive
+    msg('FERMEZ LES PORTES BLINDÉES : flèches en rythme !', '#ffb35e', 3);
     [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.25, 'square', 0.06, i * 0.12));
   }
   else if (S.next >= STATIONS.length) { S.endT = 9; msg('Fin de service à ' + st.name + ' : tout le monde descend.', '#ffd75e', 6); }
@@ -350,6 +352,7 @@ function drawHint() {
   else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') hint = `AIGUILLE EN PANNE à ${Math.max(0, Math.round(S.sw.sig - S.pos))} m : arrêtez-vous avant le signal rouge`;
   else if (S.sw && S.sw.kind === 'merge' && swRed() && S.phase === 'drive') hint = 'SIGNAL JAUNE : un train traverse votre voie, ralentissez pour arriver quand le signal passe au vert';
   else if (S.sw && S.sw.kind === 'fork' && S.sw.limOn) hint = S.v * 3.6 > 31 ? `VOIE DÉVIÉE : 30 km/h ! Déraillement au-delà de ${30 + DERAIL}` : 'VOIE DÉVIÉE : 30 km/h sur l\'aiguille';
+  else if (S.phase === 'drive' && FIRE() && wzOn().length) hint = `☣ ZOMBIE${wzOn().length > 1 ? 'S' : ''} SUR LE PARE-BRISE : freinez franchement (S) pour ${wzOn().length > 1 ? 'les' : 'le'} décrocher, sinon ${wzOn().length > 1 ? 'ils entreront' : 'il entrera'} à la prochaine station`;
   else if (S.sw && S.sw.kind === 'fork' && S.sw.tot && S.sw.plan && S.sw.plan[S.sw.idx] && S.sw.passed && S.phase === 'drive' && S.sw.plan[S.sw.idx].set0 !== S.sw.plan[S.sw.idx].want) hint = `AIGUILLE SUIVANTE (${S.sw.idx + 1}/${S.sw.tot}) : appuyez dès maintenant sur ${S.sw.plan[S.sw.idx].want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}, sinon signal rouge et freinage d'urgence`;
   else if (S.sw && S.sw.kind === 'fork' && !S.sw.passed && S.sw.pos - S.pos < 200 && S.phase === 'drive') hint = !S.sw.tgt ? `BIFURCATION : choisissez la direction ! ${S.sw.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}` : S.sw.tgt === S.sw.want ? `BIFURCATION : direction ${S.sw.want === 'D' ? 'DIRECTE' : FIRE() ? 'DÉVIÉE' : 'DÉVIÉE (30 km/h)'} sélectionnée${S.sw.fixT > 0 ? ', aiguille en mouvement…' : ''}` : `BIFURCATION : mauvaise direction sélectionnée ! ${S.sw.want === 'D' ? '← DIRECT' : '→ DÉVIÉ'}`;
   else if (S.barr && !S.barr.broken && !S.backup && S.phase === 'drive' && S.barr.pos - S.pos < 260) hint = `BARRICADE DE ZOMBIES à ${Math.max(0, Math.round(S.barr.pos - S.pos))} m : FONCEZ (Z) ! Au moins ${S.barr.need} km/h — vous : ${Math.round(S.v * 3.6)} km/h`;

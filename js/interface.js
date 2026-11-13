@@ -809,7 +809,7 @@ function drawHelp() {
       'À quai, plus on attend, plus il en monte…',
       ['#ffb35e', '…mais le feu approche (panneau bas gauche).'],
       'Quai brûlé : ses voyageurs sont perdus.',
-      'À l\'abri : décompte et note sur 20 (55 % = 20/20).',
+      'À l\'abri : sauvés sur le total, note sur 20 (90 % = 20).',
       `Médailles : bronze ${MEDS()[0][0]} · argent ${MEDS()[1][0]} · or ${MEDS()[2][0]}`,
     ]);
     col(198, 28, 'À QUAI', [

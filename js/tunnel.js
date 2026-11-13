@@ -126,6 +126,11 @@ function chooseDir(k) {
   if (!w || w.kind !== 'fork' || w.passed || S.rev || S.phase !== 'drive') return false;
   if (w.pos - S.pos < (w.lock || SW_LOCK)) { msg('Aiguille verrouillée : la rame est trop près', '#ff6b5b', 2); beep(220, 0.15, 'square', 0.04); return true; }
   if (k === w.tgt) { beep(990, 0.05, 'sine', 0.04); return true; }
+  if (FIRE()) {   // fuite : l'aiguille bascule tout de suite, le signal ne repasse pas au rouge (on peut changer d'avis jusqu'au verrou)
+    w.tgt = w.set = k; w.fixT = 0; w.chose = true; S.vacAlert = 0; S.vacT = Math.max(S.vacT, 20);
+    beep(k === w.want ? 880 : 300, 0.07, 'square', 0.05); noise(0.25, 0.08, 'bandpass', 600, 2);
+    return true;
+  }
   w.tgt = k; w.fixT = w.fix || SW_FIX; w.chose = true; S.vacAlert = 0; S.vacT = Math.max(S.vacT, 20);
   beep(700, 0.06, 'square', 0.04); noise(0.4, 0.1, 'bandpass', 500, 2);
   if (!w.tot) msg(`Itinéraire commandé : ${k === 'D' ? 'DIRECT' : 'DÉVIÉ'}. Aiguille en mouvement, signal fermé`, '#ffd75e', 2.5);

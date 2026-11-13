@@ -357,7 +357,7 @@ function drawEnd() {
   const pil = [['la précision', cnt('p') / nArr], ['la ponctualité', cnt('t') / nArr], ['le remplissage', cnt('v') / nDep], ['la sécurité', secPct() / 100]];
   const weak = pil.reduce((a, b) => b[1] < a[1] ? b : a);
   const totStars = cnt('p') + cnt('t') + cnt('v');
-  if (S.fire) txt(`🔥 ${S.saved} voyageurs sauvés  ·  ${S.lost} perdus (†)  ·  ☣ ${STATIONS.filter(x => x.res.zok).length} station${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''} infestée${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''} évitée${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''}  ·  🛡 ${secPct()} %`, W / 2, 163, 11, '#ffd0a8', 'center', 'VT323', W - 16);
+  if (S.fire) txt(`🔥 ${S.saved} sauvés sur ${S.saved + S.lost} (${S.saved + S.lost ? Math.round(100 * S.saved / (S.saved + S.lost)) : 0} %)  ·  ${S.lost} perdus (†)  ·  ☣ ${STATIONS.filter(x => x.res.zok).length} station${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''} infestée${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''} évitée${STATIONS.filter(x => x.res.zok).length > 1 ? 's' : ''}  ·  🛡 ${secPct()} %`, W / 2, 163, 11, '#ffd0a8', 'center', 'VT323', W - 16);
   else txt(`★ ${totStars} étoiles  ·  🛡 ${secPct()} %  ·  ⚗ ${S.perfectFills || 0} dosage${(S.perfectFills || 0) > 1 ? 's' : ''} parfait${(S.perfectFills || 0) > 1 ? 's' : ''}  ·  trafic +${S.trafBonus}  ·  point faible : ${weak[0]}`, W / 2, 163, 11, '#e6ecf5', 'center', 'VT323', W - 16);
   if (S.cat) CAT.forEach((c, i) => {      // médailles par catégorie
     const cx = 34 + i * 118, lv = S.cat[i], blink = S.catNew[i] && lv > 0 && Math.floor(S.t * 4) % 2;
@@ -393,11 +393,14 @@ function render() {
   if (shk) { g.save(); g.translate((Math.random() - 0.5) * shk, (Math.random() - 0.5) * shk); }
   drawScene();
   drawDebris();
+  if (S.mode === 'running' && S.phase === 'drive' || (S.wz && S.wz.length)) drawWindZombies();
   if (shk) g.restore();
   drawFireGlow();
   drawGauge();
-  drawCab();
-  if (S.mode === 'running' && S.phase !== 'drive') { drawCCTV(); drawPops(); if (S.fire) { drawFirePanel(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); } else drawTraffic(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); }
+  const blastOn = S.mode === 'running' && S.phase !== 'drive' && S.blast;   // final des portes blindées : on n'est plus dans la rame
+  if (!blastOn) drawCab();
+  if (blastOn) drawBlastScene();   // final du mode feu : la scène des portes blindées remplace les caméras
+  else if (S.mode === 'running' && S.phase !== 'drive') { drawCCTV(); drawPops(); if (S.fire) { drawFirePanel(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); } else drawTraffic(8, CAM_Y0 + CAM_H + 3 + (CAM_H - 44) / 2, 117); }
   if (S.mode === 'running' && S.phase === 'drive') { if (S.fire) { drawFireChip(); drawRearCam(); } else { drawSchedChip(); drawLeaderPanel(); drawTrafficWarn(); } drawTopCam(); }
   if (S.alarm && Math.floor(S.t * 4) % 2) { g.fillStyle = 'rgba(255,0,0,0.12)'; g.fillRect(0, 0, W, VIEW_H); }
   drawDoorAlarm();
@@ -413,10 +416,11 @@ function render() {
     g.fillStyle = 'rgba(6,8,14,0.85)'; g.fillRect(W / 2 - 110, 54, 220, 50);
     drawMissions(W / 2 - 102, 66, false);
   }
-  drawHint();
+  if (!blastOn) drawHint();
   drawTuto();
   if (!S.mg) drawMsgs();   // pendant le jeu de flèches, pas de messages par-dessus
   drawUnload();
+  drawBlast();
   if (S.mode === 'title') drawTitle();
   if (S.mode === 'end') drawEnd();
   if (S.mode === 'running' && S.over) drawGameOver();

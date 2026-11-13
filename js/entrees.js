@@ -45,6 +45,7 @@ addEventListener('keydown', e => {
     else { S.rConfirm = S.t + 2.5; msg('Recommencer ? Appuyez encore sur R', '#ffb35e', 2.5); }
     return;
   }
+  if (S.blast && !S.blast.res && S.mode === 'running' && k !== 'escape') { const d = { arrowleft: 'L', q: 'L', arrowdown: 'D', s: 'D', arrowup: 'U', z: 'U', arrowright: 'R', d: 'R' }[k]; if (d) { if (!e.repeat) blastHit(d); return; } }
   if (S.mg && k !== 'escape') { if (!e.repeat) mgHit({ arrowleft: 'L', q: 'L', arrowdown: 'D', s: 'D', arrowup: 'U', z: 'U', arrowright: 'R', d: 'R' }[k]); return; }
   if (k === 'e' && !e.repeat && S.mode === 'running') { if (canManual()) startManual(); else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') msg(S.v > 0 ? 'Arrêtez d\'abord la rame' : 'Approchez-vous du signal de l\'aiguille', '#ffd75e', 2); return; }
   if ((k === 'arrowleft' || k === 'arrowright') && S.mode === 'running') { chooseDir(k === 'arrowleft' ? 'D' : 'G'); return; }

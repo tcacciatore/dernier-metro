@@ -5,8 +5,10 @@ const FIRE_V = [5.4, 5.8, 6.2, 6.6];            // vitesse de base par ligne (m/
 const fireGap = () => S.fire ? S.pos - TRAIN_LEN - S.fire.z : 999;   // de la vague à l'arrière de la rame
 function updateFire(dt) {
   const f = S.fire; if (!f || S.over) return;
-  if (S.next >= STATIONS.length && S.phase !== 'drive') {   // terminus : les portes blindées de l'abri se ferment
-    if (!f.safe) { f.safe = true; }
+  if (S.next >= STATIONS.length && S.phase !== 'drive') {   // terminus : la vague arrive sur l'abri pendant qu'on ferme les portes blindées
+    const bl = S.blast;
+    if (bl && !bl.res) { f.z += bl.fv * dt; if (fireGap() <= 0) blastResolve(false); }
+    else if (!f.safe) f.safe = true;
     return;
   }
   const gap = fireGap();
@@ -413,4 +415,89 @@ function drawIncidentBars() {
     g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x + 4, y + h - 3, w - 6, 2);
     g.fillStyle = fr < 0.3 ? '#ff4a3a' : col; g.fillRect(x + 4, y + h - 3, (w - 6) * Math.max(0, Math.min(1, fr)), 2);
   });
+}
+// ---------- Mode feu : zombies agrippés au pare-brise (en traversant une station infestée) ----------
+// Ils masquent la vue. Un coup de frein franc (S) ou un virage pris vite les décroche ; ceux qui restent
+// jusqu'à la station suivante se faufilent dans la rame et contaminent des voyageurs.
+const WZ_SKIN = ['#7f9a6a', '#6e8a5c', '#8aa276', '#748f63'];
+function windZombiesJump(st) {
+  const kmh = S.v * 3.6, n = kmh >= 55 ? 1 : kmh >= 35 ? 2 : 3;
+  if (!S.wz) S.wz = [];
+  const slots = [0.24, 0.5, 0.76].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < n; i++) S.wz.push({ x: W * slots[i] + (Math.random() - 0.5) * 30, y: VIEW_H - 40 - Math.random() * 30, s: 0.85 + Math.random() * 0.35,
+    skin: pick(WZ_SKIN), ph: Math.random() * 6, t: 0, off: false, vx: 0, vy: 0, rot: 0, a: 1, land: 0.25 + i * 0.18 });
+  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Freinez franchement (S) pour ${n > 1 ? 'les' : 'le'} décrocher`, '#9aff6a', 3.5);
+  noise(0.3, 0.35, 'lowpass', 300, 0.8); beep(90, 0.2, 'triangle', 0.25);
+}
+const wzOn = () => (S.wz || []).filter(z => !z.off);
+function wzDetach(why) {
+  const z = wzOn()[0]; if (!z) return;
+  z.off = true; z.vx = (z.x < W / 2 ? -1 : 1) * (120 + Math.random() * 80); z.vy = why === 'brake' ? -60 : 20; z.rot = 0;
+  if (!S.smears) S.smears = [];
+  S.smears.push({ x: z.x, y: z.y - 20 * z.s, s: z.s, t: 0 });
+  S.score += 15; noise(0.25, 0.25, 'lowpass', 400, 0.8); beep(150, 0.12, 'sawtooth', 0.06);
+  msg(why === 'brake' ? 'Zombie décroché par le freinage (+15)' : 'Le virage a décroché un zombie (+15)', '#7dff8a', 1.8);
+}
+function updateWindZombies(dt) {
+  if (!FIRE() || S.mode !== 'running') return;
+  // saut au milieu du quai d'une station infestée qu'on traverse
+  const st = STATIONS[S.next];
+  if (st && st.zombie && S.phase === 'drive' && !st.wzDone && S.v > 2 && S.pos > st.pos - PL * 0.5) { st.wzDone = true; windZombiesJump(st); }
+  if (S.smears) { S.smears.forEach(s => s.t += dt); S.smears = S.smears.filter(s => s.t < 18); }
+  if (!S.wz || !S.wz.length) return;
+  for (const z of S.wz) {
+    z.t += dt; z.ph += dt;
+    if (z.off) { z.x += z.vx * dt; z.y += z.vy * dt; z.vy += 500 * dt; z.rot += (z.vx > 0 ? 3 : -3) * dt; z.a = Math.max(0, z.a - dt * 1.4); }
+  }
+  S.wz = S.wz.filter(z => !z.off || z.a > 0);
+  if (S.phase !== 'drive') return;
+  // freinage franc : il faut serrer fort un instant pour qu'un zombie lâche prise
+  if (keyBrake() && S.brakeF > 0.8 && S.v * 3.6 > 15) { S.wzBrake = (S.wzBrake || 0) + dt; if (S.wzBrake > 0.35 && wzOn().length) { S.wzBrake = 0; wzDetach('brake'); } } else S.wzBrake = 0;
+  // virage pris assez vite : la force centrifuge en arrache un de temps en temps
+  const b = bendHere();
+  if (b && S.v * 3.6 > 22 && wzOn().length) { S.wzBend = (S.wzBend || 0) + dt; if (S.wzBend > 1.1) { S.wzBend = 0; wzDetach('bend'); } } else S.wzBend = 0;
+}
+// à l'arrivée en station : ceux qui sont encore agrippés se faufilent dans la rame
+function windZombiesBoard() {
+  const on = wzOn(); if (!on.length || !FIRE()) return;
+  let lost = 0;
+  for (let i = 0; i < on.length; i++) { const c = heavyCar(), k = Math.min(S.cars[c], 6); S.cars[c] -= k; S.load -= k; lost += k; }
+  S.lost += lost; S.score -= 40 * on.length; S.wz = [];
+  msg(`☣ ${on.length} zombie${on.length > 1 ? 's' : ''} du pare-brise se faufile${on.length > 1 ? 'nt' : ''} dans la rame : ${lost} voyageurs contaminés`, '#9aff6a', 4);
+  beep(140, 0.25, 'sawtooth', 0.06); noise(0.3, 0.2, 'bandpass', 400, 3);
+}
+// rendu : visages et mains plaqués contre la vitre, traces laissées sur le verre
+function drawWindZombies() {
+  if (S.smears) for (const s of S.smears) {
+    const a = 0.35 * (1 - s.t / 18);
+    g.fillStyle = `rgba(70,90,50,${a})`;
+    for (let k = 0; k < 5; k++) { const dx = (k - 2) * 7 * s.s; g.fillRect(s.x + dx - 2 * s.s, s.y - 8 * s.s + Math.abs(k - 2) * 2, 4 * s.s, 26 * s.s + k * 3); }
+  }
+  if (!S.wz || !S.wz.length) return;
+  for (const z of S.wz) {
+    const land = Math.min(1, z.t / z.land), sc = z.s * (0.4 + 0.6 * land), wob = Math.sin(z.ph * 3) * 2, slide = z.off ? 0 : Math.sin(z.ph * 0.7) * 3;
+    g.save(); g.globalAlpha = z.a * Math.min(1, land * 1.5); g.translate(z.x + wob, z.y + slide); g.rotate(z.rot); g.scale(sc, sc);
+    // épaules et torse (vêtements en lambeaux)
+    g.fillStyle = '#2a2a24'; g.beginPath(); g.ellipse(0, 52, 56, 34, 0, Math.PI, 2 * Math.PI); g.fill(); g.fillRect(-56, 52, 112, 30);
+    g.fillStyle = '#3a3a30'; for (let k = -2; k <= 2; k++) g.fillRect(k * 18 - 3, 30, 6, 40);
+    // tête aplatie contre la vitre
+    g.fillStyle = z.skin; g.beginPath(); g.ellipse(0, 0, 30, 36, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.18)'; g.beginPath(); g.ellipse(6, 6, 24, 30, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(220,255,200,0.25)'; g.beginPath(); g.ellipse(-8, -8, 18, 22, 0, 0, Math.PI * 2); g.fill();   // reflet du nez écrasé sur le verre
+    g.fillStyle = '#1a1a14'; for (let k = 0; k < 7; k++) g.fillRect(-26 + k * 8, -38 + (k % 2) * 3, 5, 12);         // cheveux hirsutes
+    for (const ex of [-11, 11]) { g.fillStyle = '#120808'; g.beginPath(); g.ellipse(ex, -4, 8, 6, 0, 0, Math.PI * 2); g.fill();   // orbites
+      const gl = 0.6 + 0.4 * Math.sin(z.ph * 6 + ex); g.fillStyle = `rgba(255,40,30,${gl})`; g.beginPath(); g.arc(ex, -4, 3, 0, 7); g.fill(); }
+    g.fillStyle = '#200a08'; g.beginPath(); g.ellipse(0, 18, 12, 8 + 3 * Math.sin(z.ph * 4), 0, 0, Math.PI * 2); g.fill();   // bouche ouverte
+    g.fillStyle = '#d8d0a8'; for (let k = -2; k <= 2; k++) g.fillRect(k * 4 - 1, 11, 2.5, 4);
+    // mains à plat sur le verre, doigts écartés
+    for (const sd of [-1, 1]) {
+      g.save(); g.translate(sd * 58, -16 + Math.sin(z.ph * 2 + sd) * 3); g.rotate(sd * 0.25);
+      g.fillStyle = z.skin; g.beginPath(); g.ellipse(0, 0, 14, 16, 0, 0, Math.PI * 2); g.fill();
+      for (let f = -2; f <= 2; f++) { g.save(); g.rotate(f * 0.32); g.fillRect(-2.5, -34, 5, 22); g.beginPath(); g.arc(0, -34, 2.5, 0, 7); g.fill(); g.restore(); }
+      g.fillStyle = 'rgba(220,255,200,0.22)'; g.beginPath(); g.ellipse(-3, -2, 8, 9, 0, 0, Math.PI * 2); g.fill();
+      g.restore();
+    }
+    g.restore();
+  }
+  g.globalAlpha = 1;
 }
