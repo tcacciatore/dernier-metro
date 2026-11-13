@@ -22,6 +22,7 @@ addEventListener('keydown', e => {
   keys[k] = true;
   initAudio(); if (AC && AC.state === 'suspended') AC.resume();
   if (S.mode === 'title') {
+    if (TITLE.stage === 0 && TITLE.wait) { if (!e.repeat) introGo(); return; }   // premier appui : l'intro démarre, avec le son
     if (TITLE.stage === 0) { if (!e.repeat) titleGo(); return; }    // intro : n'importe quelle touche
     if (k === 'arrowleft' || k === 'arrowright' || ['1', '2', '3', '4'].includes(k)) {
       const nL = LINES.length;
@@ -50,7 +51,7 @@ addEventListener('keydown', e => {
   if (k === 'e' && !e.repeat && S.mode === 'running') { if (canManual()) startManual(); else if (S.sw && S.sw.kind === 'manual' && !S.sw.done && S.phase === 'drive') msg(S.v > 0 ? 'Arrêtez d\'abord la rame' : 'Approchez-vous du signal de l\'aiguille', '#ffd75e', 2); return; }
   if ((k === 'arrowleft' || k === 'arrowright') && S.mode === 'running') { chooseDir(k === 'arrowleft' ? 'D' : 'G'); return; }
   if (k === 'b' && !e.repeat && S.mode === 'running') { emergencyBrake(); return; }
-  if (k === ' ') { vacmaAck(); return; }
+  if (k === ' ') { if (FIRE() && S.mode === 'running') { if (!e.repeat) wipe(); } else vacmaAck(); return; }   // fuite : pas de veille, Espace actionne les essuie-glaces
   if (k === 'k' && FIRE()) return;   // fuite : pas de klaxon
   if (k === 'k') {
     sfxHorn(); S.hornT = 0.7;
@@ -84,7 +85,7 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 cv.addEventListener('click', () => {
   cv.focus(); initAudio(); if (AC && AC.state === 'suspended') AC.resume();
-  if (S.mode === 'title') { if (TITLE.stage === 0) titleGo(); else startService(false); }
+  if (S.mode === 'title') { if (TITLE.stage === 0 && TITLE.wait) introGo(); else if (TITLE.stage === 0) titleGo(); else startService(false); }
 });
 // pause : Échap, ou automatiquement quand la fenêtre perd le focus
 function setPause(on) {

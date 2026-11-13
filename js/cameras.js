@@ -70,7 +70,7 @@ function drawCCTV() {
         if ((m.st === 'door' && !m.holder && !m.fight) || m.st === 'inside') {
           // montée : il franchit le seuil, monte la marche et s'enfonce dans la voiture (dessiné dans l'encadrement de porte)
           const p = m.st === 'door' ? 0.55 * Math.max(0, Math.min(1, 1 - m.t / 0.3)) : 0.55 + 0.45 * Math.max(0, Math.min(1, 1 - m.t / 0.4));
-          const o = Math.max(0.3, S.doors * 0.62), zz = m.z + (m.door - m.z) * Math.min(1, p * 2);
+          const o = Math.max(0.3, S.doors * 0.62), zz = m.z + ((m.bz ?? m.door) - m.z) * Math.min(1, p * 2);
           g.save();
           if (p > 0.2) { g.beginPath(); g.rect(X(m.door - o), ty + 3, X(m.door + o) - X(m.door - o), by - ty + 4); g.clip(); }
           g.globalAlpha = p > 0.55 ? 1 - (p - 0.55) / 0.45 * 0.85 : 1;
@@ -78,8 +78,20 @@ function drawCCTV() {
           g.globalAlpha = 1; g.restore();
           return;
         }
+        if (m.grp && m.st === 'walk') {   // groupe : les membres suivent le meneur, en grappe derrière lui
+          const dir = m.dir || 1;
+          m.fol.forEach((f, i) => { const fz = m.z - dir * (0.55 + 0.5 * i), fx = m.x + (i % 2 ? 0.45 : -0.15);
+            drawPerson(X(fz), by + 2 + fx * 5, vpm * (1 + 0.07 * fx), f, m.walk + i * 1.7); });
+        }
         drawPerson(X(m.z), by + 2 + m.x * 5, k, m, m.walk);
-        if (m.halt) { g.fillStyle = '#ff6b5b'; g.fillRect(Math.round(X(m.z)) - 1, Math.round(by + 2 + m.x * 5 - k * m.h) - 5, 3, 3); }
+        if (m.grp && m.st === 'walk') {   // pastille « ×N » : places qu'il faut d'un coup
+          const bx = Math.round(X(m.z)), byy = Math.round(by + 2 + m.x * 5 - k * m.h) - 8, red = m.halt && Math.floor(S.t * 4) % 2;
+          g.fillStyle = '#000'; g.fillRect(bx - 7, byy - 1, 14, 9);
+          g.fillStyle = red ? '#ff4a3a' : '#ffd75e'; g.fillRect(bx - 6, byy, 12, 7);
+          g.beginPath(); g.moveTo(bx - 2, byy + 7); g.lineTo(bx + 2, byy + 7); g.lineTo(bx, byy + 9.5); g.fill();   // pointe vers le meneur
+          g.fillStyle = '#111'; g.font = 'bold 7px VT323, monospace'; g.textAlign = 'center'; g.fillText(`×${m.grp.n}`, bx, byy + 6);
+        }
+        if (m.halt && !m.grp) { g.fillStyle = '#ff6b5b'; g.fillRect(Math.round(X(m.z)) - 1, Math.round(by + 2 + m.x * 5 - k * m.h) - 5, 3, 3); }
       });
     JOSTLE = 0;
     // effet vidéo : lignes de balayage + vignette
@@ -114,7 +126,7 @@ function drawCCTV() {
     else if (cf >= 1) { g.fillStyle = 'rgba(160,20,20,0.85)'; g.fillRect(SX + CAM_W - 47, SY + CAM_H - 13, 44, 10); txt('COMPLET', SX + CAM_W - 25, SY + CAM_H - 5, 10, '#ffffff', 'center'); }
     if ((S.phase === 'dwell' || S.phase === 'alert') && S.next < STATIONS.length && S.doors > 0.5) {
       // la touche à utiliser, dessinée comme une touche de clavier : elle clignote quand c'est le moment de s'en servir
-      const shut = carShut(car), stuck = !FIRE() && S.cars[car] >= CAR_CAP && !shut && S.mp.some(m => m.st === 'walk' && m.halt && carOf(m.door) === car);
+      const shut = carShut(car), stuck = !FIRE() && !shut && S.mp.some(m => m.st === 'walk' && m.halt && carOf(m.door) === car && (m.grp || S.cars[car] >= CAR_CAP));   // voiture pleine, ou groupe qui n'y tient pas
       const call = stuck || (!FIRE() && !shut && carState(car) === 'ok') || (FIRE() && !shut && car === heavyCar() && imbalance() > 0.12), on = call && Math.floor(S.t * 4) % 2;
       // étiquette réservée aux voitures vraiment trop chargées
       if (FIRE() && !shut && carMean() >= 12 && S.cars[car] > carMean() * 1.35) { g.fillStyle = Math.floor(S.t * 3) % 2 ? 'rgba(170,20,10,0.92)' : 'rgba(110,10,6,0.92)'; g.fillRect(SX + CAM_W - 63, SY + CAM_H - 13, 60, 10); txt('SURCHARGÉE', SX + CAM_W - 33, SY + CAM_H - 5, 10, '#ffffff', 'center'); }

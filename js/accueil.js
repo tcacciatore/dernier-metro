@@ -1,8 +1,11 @@
 // Dernier Métro · Écran d'accueil et démarrage
 // ===== écran d'accueil : intro (la rame arrive dans le tunnel), logo, puis choix de la ligne =====
-const TITLE = { stage: 0, t: 0, sel: LINE, best: [] };
+const TITLE = { stage: 0, t: 0, sel: LINE, best: [], wait: true };   // wait : écran « appuyez sur une touche » (débloque le son)
 const INTRO_HIT = 3.2;                   // instant où la rame passe et où le logo s'abat
+// premier appui : le son est débloqué, la rame peut surgir avec son vacarme
+function introGo() { TITLE.wait = false; TITLE.t = 0; try { sfxIntroTrain(INTRO_HIT); } catch (e) {} }   // le son ne doit jamais bloquer le jeu
 function titleGo() {
+  try { stopIntroTrain(); } catch (e) {}
   TITLE.stage = 1; TITLE.t = 0; TITLE.sel = LINE;
   TITLE.best = LINES.map(Ln => { try { return +localStorage.getItem('dm_best_' + modeId(Ln.id)) || 0; } catch (e) { return 0; } });
   noise(0.6, 0.25, 'bandpass', 900, 0.8, 0, 0.05); beep(392, 0.08, 'square', 0.05); beep(587, 0.12, 'square', 0.05, 0.07);
@@ -191,6 +194,15 @@ function neonFlicker(t) {    // grésillement à l'allumage, puis quelques raté
 }
 function drawTitle() {
   const t = TITLE.t;
+  if (TITLE.stage === 0 && TITLE.wait) {
+    // 0. avant l'intro : le tunnel noir, deux phares minuscules au loin
+    g.fillStyle = '#020308'; g.fillRect(0, 0, W, H);
+    const tt = S.t, fl = 0.5 + 0.5 * Math.sin(tt * 2.2);
+    for (const sd of [-1, 1]) glow(W / 2 + sd * 5, H * 0.42, 5 + fl * 2, '255,226,170', 0.25 + 0.15 * fl);
+    if (Math.floor(tt * 1.6) % 2 === 0) txt('APPUYEZ SUR UNE TOUCHE', W / 2, H * 0.72, 14, '#e6ecf5', 'center');
+    txt('🔊 son conseillé', W / 2, H * 0.72 + 14, 9, '#8a909c', 'center');
+    return;
+  }
   if (TITLE.stage === 0) {
     // 1. intro : noir du tunnel, deux phares au loin qui grossissent, la rame passe plein écran
     g.fillStyle = `rgba(2,3,8,${t < INTRO_HIT ? 0.8 : 0.74})`; g.fillRect(0, 0, W, H);
@@ -398,6 +410,7 @@ function render() {
   drawDebris();
   if (S.mode === 'running' && S.phase === 'drive' || (S.wz && S.wz.length)) drawWindZombies();
   if (tr) g.restore();
+  drawWiper();
   if (S.mode === 'running') drawEmergencyBrake();
   drawFireGlow();
   drawGauge();

@@ -31,6 +31,38 @@ function setupMirror(st) {
       sp: 1.1 + Math.random() * 0.5, delay: 1 + Math.random() * (st.crowd ? 20 : 8 + 5 * st.aff), walk: 0 }));
   });
   st.res.offer += st.people.length; S.paxOffer += st.people.length;
+  spawnGroups(st);
+}
+// ---------- Groupes à caser (service normal) ----------
+// Un groupe prend plusieurs places et ne veut pas être séparé : il ne monte que dans une voiture qui a de la place
+// pour tous. Devant une voiture trop pleine, il reste planté : il faut fermer cette voiture (touche 1 à 5)
+// pour qu'il aille vers une autre. Bien casé : +20 en plus des +5 par voyageur.
+const GROUPS = [
+  { id: 'poussette', n: 3, w: 5, label: 'Poussette', pl: false },
+  { id: 'touristes', n: 5, w: 4, label: 'Touristes', pl: true },
+  { id: 'fanfare', n: 8, w: 1.3, label: 'Fanfare', pl: false },
+];
+const need = m => m.grp ? m.grp.n : 1;
+function mkGroupMember(gid) {
+  const p = mkPerson(0, 0);
+  if (gid === 'touristes') Object.assign(p, { kind: 'adult', kid: null, acc: 'map', acc2: 'suitcase', hat: Math.random() < 0.6 ? 'cap' : p.hat });
+  if (gid === 'fanfare') Object.assign(p, { kind: 'adult', kid: null, outfit: 'coat', c: '#9a1c1c', pants: '#1a1a22', hat: 'cap', acc: null, acc2: null, scarf: '#d4ac0d' });
+  return p;
+}
+function spawnGroups(st) {
+  const si = STATIONS.indexOf(st);
+  if (FIRE() || st.zombie || si < 1 || si >= STATIONS.length - 1) return;
+  let k = (Math.random() < 0.7 ? 1 : 0) + (st.aff > 1 && Math.random() < 0.35 ? 1 : 0);
+  while (k-- > 0) {
+    const tot = GROUPS.reduce((a, gq) => a + gq.w, 0); let r = Math.random() * tot, gq = GROUPS[0];
+    for (const x of GROUPS) { if ((r -= x.w) < 0) { gq = x; break; } }
+    const lead = mkGroupMember(gq.id);
+    if (gq.id === 'poussette') Object.assign(lead, { kind: 'adult', kid: null, acc: 'stroller', slow: 0.85 });
+    const z = pick([-2, 37, 79]) + Math.random() * 2, door = DOORS.reduce((a, b) => Math.abs(b - z) < Math.abs(a - z) ? b : a);
+    const fol = []; for (let i = 0; i < Math.min(4, gq.n - (gq.id === 'poussette' ? 2 : 1)); i++) fol.push(mkGroupMember(gq.id));
+    S.mp.push(Object.assign(lead, { st: 'walk', door, z, x: 4.2, side: 1, sp: 1.0, delay: 3 + Math.random() * 10, walk: 0, grp: gq, fol }));
+    st.res.offer += gq.n; S.paxOffer += gq.n;
+  }
 }
 // un voyageur arrive sur le quai par un accès (escalier avant, milieu ou arrière)
 function spawnArrival(st, extra) {
@@ -125,6 +157,19 @@ function pop(dz, text, col) {
 }
 const doorBusyOut = dz => S.mp.some(o => o.door === dz && o.st === 'out');
 const doorBusyIn = dz => S.mp.some(o => o.door === dz && o.st === 'door');
+// files d'attente : de chaque côté de la porte, le long du quai, le centre laissé libre pour ceux qui descendent.
+// Chacun garde le côté d'où il arrive et son rang (ordre d'arrivée) ; la tête de file monte par son vantail.
+function rankQueues() {
+  const Q = {};
+  for (const m of S.mp) {
+    if (m.st !== 'walk' || m.delay > 0 || m.halt) continue;
+    if (m.qDoor !== m.door) { m.qDoor = m.door; m.qAt = undefined; m.qs = m.z < m.door ? -1 : 1; }   // nouvelle porte : on choisit son côté
+    if (m.qAt === undefined && Math.abs(m.z - m.door) < 5 && m.x < 2.6) m.qAt = S.t + Math.random() * 0.01;
+    (Q[m.door + '|' + m.qs] = Q[m.door + '|' + m.qs] || []).push(m);
+  }
+  for (const k in Q) Q[k].sort((a, b) => (a.qAt ?? 1e9 + Math.abs(a.z - a.door)) - (b.qAt ?? 1e9 + Math.abs(b.z - b.door))).forEach((m, i) => { m.qr = i; });
+}
+const laneBusy = (dz, side) => S.mp.some(o => o.door === dz && o.st === 'door' && o.lane === side);
 function walkTo(m, tz, tx, dt) {
   const dz = tz - m.z, dx = tx - m.x, dd = Math.hypot(dz, dx), step = m.sp * (m.slow || 1) * dt;
   if (Math.abs(dz) > 0.02) m.dir = Math.sign(dz);
@@ -133,29 +178,33 @@ function walkTo(m, tz, tx, dt) {
 }
 function updateMirror(dt) {
   const open = S.doors > 0.6;
+  rankQueues();
   for (const m of S.mp) {
     if (m.delay > 0) { if (open || m.st !== 'out') m.delay -= dt; continue; }
     if (m.st === 'walk') {
       if (!open || S.alerted) { m.halt = S.alerted; continue; }   // après le signal sonore : on ne monte plus
       const mc = carOf(m.door), shut = carShut(mc);
-      if (shut || S.cars[mc] >= CAR_CAP || mc === S.dirtyCar) {
+      if (shut || S.cars[mc] + need(m) > CAR_CAP || mc === S.dirtyCar) {
         // voiture pleine, fermée ou souillée : on cherche une porte d'une autre voiture
-        const alt = DOORS.filter(dz => { const cc = carOf(dz); return S.cars[cc] < CAR_CAP && cc !== S.dirtyCar && !carShut(cc); }).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
+        const alt = DOORS.filter(dz => { const cc = carOf(dz); return S.cars[cc] + need(m) <= CAR_CAP && cc !== S.dirtyCar && !carShut(cc); }).sort((a, b) => Math.abs(a - m.z) - Math.abs(b - m.z))[0];
         // voiture fermée (ou souillée) : on file vers la porte ouverte la plus proche ; voiture pleine mais ouverte : on reste planté devant
         if ((shut || mc === S.dirtyCar) && alt !== undefined && Math.abs(alt - m.z) < 40) m.door = alt;
         else {
           m.halt = true;
+          if (m.grp && !m.grpWarn && !shut) { m.grpWarn = true; msg(`${m.grp.label} (${m.grp.n} places) bloqué${m.grp.pl ? 's' : 'e'} devant V${mc + 1} : fermez-la (touche ${mc + 1}) pour ${m.grp.pl ? 'les' : 'la'} envoyer vers une voiture plus vide`, '#ffd75e', 4); }
           if (S.load >= CAP && !S.fullWarn) { S.fullWarn = true; msg('Rame pleine ! Plus personne ne peut monter', '#ff6b5b', 3); }
           if (Math.abs(m.x - 0.25) < 1.2) walkTo(m, m.z, 1.4, dt);   // recule du bord
           continue;
         }
       }
       m.halt = false;
-      if ((doorBusyOut(m.door) || doorBusyIn(m.door)) && !m.runner) {
-        // on laisse descendre, ou on attend son tour : une personne à la fois dans l'encadrement
-        walkTo(m, m.door + m.side * (1.0 + (hsh(m.seed * 1000 | 0, 7) * 1.6)), 0.6 + hsh(m.seed * 1000 | 0, 8) * 1.4, dt);
-      } else if (walkTo(m, m.door, 0.25, dt)) {
-        m.st = 'door'; m.t = 0.3;   // on monte vite
+      const qs = m.qs || 1, qr = m.qr || 0;
+      if (!m.runner && (doorBusyOut(m.door) || laneBusy(m.door, qs) || qr > 0)) {
+        // on laisse descendre, ou on attend son tour, rangé en file le long du quai (une place tous les 60 cm)
+        walkTo(m, m.door + qs * (1.1 + 0.55 * qr), 0.45 + (qr % 2) * 0.35 + hsh(m.seed * 1000 | 0, 8) * 0.15, dt);
+      } else if (walkTo(m, m.door + qs * 0.3, 0.25, dt)) {
+        m.lane = qs; m.bz = m.door + qs * 0.3;   // monte par son vantail : deux flux en alternance
+        m.st = 'door'; m.t = m.grp ? 0.3 + 0.2 * m.grp.n : 0.3;   // on monte vite (un groupe prend son temps)
         if (FIRE()) { const c = carOf(m.door), m0 = Math.max(12, carMean()), rc = S.cars[c] / m0; if (rc > 1.15) m.t = Math.min(2.4, 0.3 * (1 + 7 * (rc - 1.15))); }   // voiture surchargée : on s'y entasse au ralenti
         if (S.holderPending && !m.suspect) { S.holderPending = false; m.holder = true; m.t = 25; }   // fêtard qui retient la porte
       }
@@ -168,12 +217,14 @@ function updateMirror(dt) {
         pop(m.door, `☣ -${lose}`, '#9aff6a'); beep(140, 0.25, 'sawtooth', 0.06); noise(0.3, 0.2, 'bandpass', 400, 3);
         continue;
       }
-      if (m.t <= 0 && !FIRE() && S.cars[carOf(m.door)] >= CAR_CAP) { m.st = 'walk'; m.x = 0.7; continue; }   // voiture pleine entre-temps : il repart vers la porte voisine
+      if (m.t <= 0 && !FIRE() && S.cars[carOf(m.door)] + need(m) > CAR_CAP) { m.st = 'walk'; m.x = 0.7; continue; }   // voiture pleine entre-temps : il repart vers la porte voisine
       if (m.t <= 0) {
-        m.st = m.holder ? 'in' : 'inside'; m.t = 0.4; S.pax++; S.load++; S.cars[carOf(m.door)]++; S.score += 5; STATIONS[S.cur].res.board++;
+        const nb = need(m);
+        m.st = m.holder ? 'in' : 'inside'; m.t = 0.4; S.pax += nb; S.load += nb; S.cars[carOf(m.door)] += nb; S.score += 5 * nb; STATIONS[S.cur].res.board += nb;
+        if (m.grp) { S.score += 20; S.grpOk = (S.grpOk || 0) + 1; msg(`${m.grp.label} casé${m.grp.pl ? 's' : 'e'} en V${carOf(m.door) + 1} ! (+${5 * nb + 20})`, '#7dff8a', 2); beep(660, 0.08, 'square', 0.04); beep(880, 0.08, 'square', 0.04, 0.09); beep(1320, 0.14, 'square', 0.04, 0.18); }
         if (m.suspect) S.suspects.push({ car: carOf(m.door), pending: false });
         if (S.pax >= LN().pax) mDone('pax');
-        pop(m.door, m.runner ? '+5 ★' : '+1', m.runner ? '#ffd75e' : '#7dff8a');
+        pop(m.door, m.grp ? `+${nb} ★` : m.runner ? '+5 ★' : '+1', m.runner || m.grp ? '#ffd75e' : '#7dff8a');
         beep(988, 0.05, 'square', 0.03); beep(1319, 0.09, 'square', 0.03, 0.05);   // « pièce »
       }
     } else if (m.st === 'out') {

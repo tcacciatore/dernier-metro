@@ -107,6 +107,49 @@ function sfxDoorAlarm(dur = 2.0) {
 }
 // --- sons de portes (synthèse : air comprimé, glissement, claquement) ---
 let NOISE = null;
+// intro : la rame qui surgit du tunnel, poursuivie par le feu (≈ 3,2 s jusqu'au passage, puis elle s'éloigne)
+let INTRO_BUS = null;
+function sfxIntroTrain(hit) {
+  if (!AC) return;
+  if (!NOISE) noise(0.01, 0.0001, 'lowpass', 100);   // crée le tampon de bruit partagé
+  const t0 = AC.currentTime, bus = AC.createGain(); bus.gain.value = 1; bus.connect(AC.destination); INTRO_BUS = bus;
+  const env = (gn, pts) => { gn.gain.setValueAtTime(0.0001, t0); for (const [dt, v] of pts) gn.gain.exponentialRampToValueAtTime(Math.max(0.0001, v), t0 + dt); };
+  const src = (type, f, q) => { const s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true; const fl = AC.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const gn = AC.createGain(); s.connect(fl).connect(gn).connect(bus); s.start(t0); s.stop(t0 + hit + 2.5); return [gn, fl]; };
+  // grondement qui enfle, puis s'éloigne
+  const [rg, rf] = src('lowpass', 120, 0.8);
+  env(rg, [[0.3, 0.05], [hit * 0.7, 0.3], [hit - 0.05, 0.9], [hit + 0.25, 0.7], [hit + 2.2, 0.0001]]);
+  rf.frequency.setValueAtTime(120, t0); rf.frequency.exponentialRampToValueAtTime(420, t0 + hit); rf.frequency.exponentialRampToValueAtTime(150, t0 + hit + 1.5);
+  // le feu qui rugit derrière
+  const [fg] = src('bandpass', 380, 0.5);
+  env(fg, [[0.5, 0.03], [hit, 0.16], [hit + 2, 0.0001]]);
+  // sifflement des moteurs : monte à l'approche, puis chute au passage (effet Doppler)
+  const o = AC.createOscillator(), of = AC.createBiquadFilter(), og = AC.createGain();
+  o.type = 'triangle'; of.type = 'bandpass'; of.frequency.value = 1200; of.Q.value = 0.7;
+  o.frequency.setValueAtTime(260, t0); o.frequency.exponentialRampToValueAtTime(820, t0 + hit); o.frequency.exponentialRampToValueAtTime(430, t0 + hit + 0.35);
+  env(og, [[0.4, 0.004], [hit - 0.05, 0.11], [hit + 1.6, 0.0001]]);
+  o.connect(of).connect(og).connect(bus); o.start(t0); o.stop(t0 + hit + 2);
+  // joints de rail : « ta-dam ta-dam » de plus en plus rapide et fort
+  for (let tt = 0.35, gap = 0.5; tt < hit - 0.05; tt += gap, gap = Math.max(0.13, gap * 0.86)) {
+    const v = 0.04 + 0.4 * Math.pow(tt / hit, 2.2);
+    for (const k of [0, 0.075]) { const s = AC.createBufferSource(); s.buffer = NOISE; const fl = AC.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = 1500 + tt * 250; fl.Q.value = 2;
+      const gn = AC.createGain(), a = t0 + tt + k; gn.gain.setValueAtTime(0.0001, a); gn.gain.exponentialRampToValueAtTime(v, a + 0.005); gn.gain.exponentialRampToValueAtTime(0.0001, a + 0.07);
+      s.connect(fl).connect(gn).connect(bus); s.start(a); s.stop(a + 0.1); }
+  }
+  // avertisseur, deux tons, à mi-chemin
+  for (const f of [311, 370]) { const h = AC.createOscillator(), hf = AC.createBiquadFilter(), hg = AC.createGain(); h.type = 'sawtooth'; h.frequency.value = f; hf.type = 'lowpass'; hf.frequency.value = 1400;
+    const a = t0 + hit * 0.45; hg.gain.setValueAtTime(0.0001, a); hg.gain.exponentialRampToValueAtTime(0.05, a + 0.04); hg.gain.setValueAtTime(0.05, a + 0.55); hg.gain.exponentialRampToValueAtTime(0.0001, a + 0.75);
+    h.connect(hf).connect(hg).connect(bus); h.start(a); h.stop(a + 0.8); }
+  // passage : souffle qui balaie du suraigu au grave, et choc sourd quand le logo s'abat
+  const ws = AC.createBufferSource(); ws.buffer = NOISE; const wf = AC.createBiquadFilter(); wf.type = 'bandpass'; wf.Q.value = 0.9; const wg = AC.createGain();
+  wf.frequency.setValueAtTime(3000, t0 + hit - 0.2); wf.frequency.exponentialRampToValueAtTime(260, t0 + hit + 0.9);
+  wg.gain.setValueAtTime(0.0001, t0); wg.gain.setValueAtTime(0.0001, t0 + hit - 0.25); wg.gain.exponentialRampToValueAtTime(0.7, t0 + hit); wg.gain.exponentialRampToValueAtTime(0.0001, t0 + hit + 1.1);
+  ws.connect(wf).connect(wg).connect(bus); ws.start(t0); ws.stop(t0 + hit + 1.2);
+  const b = AC.createOscillator(), bg = AC.createGain(); b.type = 'sine'; b.frequency.setValueAtTime(90, t0 + hit); b.frequency.exponentialRampToValueAtTime(38, t0 + hit + 0.5);
+  bg.gain.setValueAtTime(0.0001, t0); bg.gain.setValueAtTime(0.0001, t0 + hit); bg.gain.exponentialRampToValueAtTime(0.5, t0 + hit + 0.01); bg.gain.exponentialRampToValueAtTime(0.0001, t0 + hit + 0.6);
+  b.connect(bg).connect(bus); b.start(t0); b.stop(t0 + hit + 0.7);
+}
+// on passe l'intro : le bruit de la rame s'efface
+function stopIntroTrain() { if (INTRO_BUS && AC) { INTRO_BUS.gain.setTargetAtTime(0, AC.currentTime, 0.08); INTRO_BUS = null; } }
 function noise(dur, vol, type, freq, q = 1, delay = 0, attack = 0.01) {
   if (!AC) return;
   if (!NOISE) { NOISE = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const d = NOISE.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }

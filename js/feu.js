@@ -417,27 +417,46 @@ function drawIncidentBars() {
   });
 }
 // ---------- Mode feu : zombies agrippés au pare-brise (en traversant une station infestée) ----------
-// Ils masquent la vue. Un frein d'urgence (B) donné au bon moment les projette tous ; un virage pris vite en décroche un ; ceux qui restent
-// jusqu'à la station suivante se faufilent dans la rame et contaminent des voyageurs.
+// Ils masquent la vue. Chacun a une prise (1 → 0) : le vent l'use dès qu'on roule vite (au-dessus de 45 km/h),
+// chaque coup d'essuie-glace (Espace) en arrache un morceau, un virage pris vite en décroche un.
+// Ceux qui tiennent jusqu'à la station suivante se faufilent dans la rame et contaminent des voyageurs.
 const WZ_SKIN = ['#7f9a6a', '#6e8a5c', '#8aa276', '#748f63'];
+const WZ_WIND = 45, WZ_WIPE = 0.36;   // km/h à partir desquels le vent arrache, prise perdue par coup d'essuie-glace
 function windZombiesJump(st, nForce) {
   const kmh = S.v * 3.6, n = nForce || (kmh >= 55 ? 1 : kmh >= 35 ? 2 : 3);
   if (!S.wz) S.wz = [];
   const slots = [0.24, 0.5, 0.76].sort(() => Math.random() - 0.5);
   for (let i = 0; i < n; i++) S.wz.push({ x: W * slots[i] + (Math.random() - 0.5) * 30, y: VIEW_H - 40 - Math.random() * 30, s: 0.85 + Math.random() * 0.35,
-    skin: pick(WZ_SKIN), ph: Math.random() * 6, t: 0, off: false, vx: 0, vy: 0, rot: 0, a: 1, land: 0.25 + i * 0.18 });
-  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! B quand l'aiguille est dans le rouge pour ${n > 1 ? 'les ' : 'l\''}arracher`, '#9aff6a', 3.5);
+    skin: pick(WZ_SKIN), ph: Math.random() * 6, t: 0, off: false, vx: 0, vy: 0, rot: 0, a: 1, land: 0.25 + i * 0.18, grip: 1, str: 0.85 + Math.random() * 0.3, jolt: 0 });
+  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Foncez à plus de ${WZ_WIND} km/h et essuie-glaces (Espace)`, '#9aff6a', 3.5);
   noise(0.3, 0.35, 'lowpass', 300, 0.8); beep(90, 0.2, 'triangle', 0.25);
 }
 const wzOn = () => (S.wz || []).filter(z => !z.off);
-function wzDetach(why) {
-  const z = wzOn()[0]; if (!z) return;
-  z.off = true; z.vx = (z.x < W / 2 ? -1 : 1) * (120 + Math.random() * 80); z.vy = why === 'brake' ? -60 : 20; z.rot = 0;
+function wzDetach(why, z) {
+  z = z || wzOn()[0]; if (!z || z.off) return;
+  z.off = true; z.rot = 0;
+  if (why === 'wind') { z.vx = (z.x < W / 2 ? -1 : 1) * (60 + Math.random() * 60); z.vy = -380 - Math.random() * 120; }   // emporté vers le haut, par-dessus le toit
+  else if (why === 'wiper') { z.vx = (S.wiper && S.wiper.dir < 0 ? -1 : 1) * (260 + Math.random() * 80); z.vy = -60; }   // balayé sur le côté
+  else { z.vx = (z.x < W / 2 ? -1 : 1) * (120 + Math.random() * 80); z.vy = 20; }
   if (!S.smears) S.smears = [];
   S.smears.push({ x: z.x, y: z.y - 20 * z.s, s: z.s, t: 0 });
   S.score += 15; noise(0.25, 0.25, 'lowpass', 400, 0.8); beep(150, 0.12, 'sawtooth', 0.06);
-  msg(why === 'brake' ? 'Zombie décroché par le freinage (+15)' : 'Le virage a décroché un zombie (+15)', '#7dff8a', 1.8);
+  msg(why === 'wind' ? 'Le vent a arraché un zombie (+15)' : why === 'wiper' ? 'Balayé par l\'essuie-glace ! (+15)' : 'Le virage a décroché un zombie (+15)', '#7dff8a', 1.8);
 }
+// essuie-glaces (Espace, mode feu) : un aller-retour de 0,5 s ; chaque zombie touché perd une partie de sa prise
+const WIPE_T = 0.5;
+function wipe() {
+  if (!FIRE() || S.phase !== 'drive' || S.over) return;
+  if (S.wiper && S.wiper.t < WIPE_T * 0.85) return;   // le balai doit presque finir son retour
+  S.wiper = { t: 0, hit: new Set() };
+  noise(0.22, 0.1, 'bandpass', 2600, 4); beep(420, 0.05, 'square', 0.02, 0.2);   // frottement du caoutchouc
+  if (S.smears) S.smears.forEach(sm => sm.t += 4);   // il nettoie aussi les traînées
+}
+// position du balai : 0 couché le long du bas, 1 dressé à gauche (à mi-course), puis retour
+const wiperK = () => { const w = S.wiper; if (!w) return 0; const u = Math.min(1, w.t / WIPE_T); return Math.sin(u * Math.PI); };
+const WIPER_PX = () => W * 0.12, WIPER_PY = () => VIEW_H + 4, WIPER_SY = 0.62;   // pivot en bas à gauche ; la vitre est plus large que haute
+const wiperAng = k => -0.06 - k * (Math.PI / 2 + 0.1);
+const zombieAng = z => Math.atan2((z.y - 20 * z.s - WIPER_PY()) / WIPER_SY, z.x - WIPER_PX());   // angle du visage vu du pivot
 function updateWindZombies(dt) {
   if (!FIRE() || S.mode !== 'running') return;
   // saut au milieu du quai d'une station infestée qu'on traverse
@@ -445,100 +464,90 @@ function updateWindZombies(dt) {
   if (st && st.zombie && S.phase === 'drive' && !st.wzDone && S.v > 2 && S.pos > st.pos - PL * 0.5) { st.wzDone = true; windZombiesJump(st); }
   if (S.wzPend && (S.wzPend.t -= dt) <= 0) { const n = S.wzPend.n; S.wzPend = null; if (S.phase === 'drive') windZombiesJump(null, n); }   // après une barricade
   if (S.smears) { S.smears.forEach(s => s.t += dt); S.smears = S.smears.filter(s => s.t < 18); }
+  // essuie-glace : le balai passe sur chaque zombie à l'aller
+  if (S.wiper) {
+    const w = S.wiper, k0 = wiperK(); w.t += dt; const k1 = wiperK();
+    w.dir = k1 >= k0 ? 1 : -1;
+    for (const z of wzOn()) {
+      if (w.hit.has(z) || z.t < z.land) continue;
+      const za = zombieAng(z), a0 = wiperAng(k0), a1 = wiperAng(k1);   // le balai passe sur son visage
+      if ((a0 >= za && a1 <= za) || (a0 <= za && a1 >= za)) {
+        w.hit.add(z); z.grip -= WZ_WIPE / z.str; z.jolt = 1;
+        noise(0.12, 0.2, 'lowpass', 500, 1); beep(110 + Math.random() * 30, 0.08, 'sawtooth', 0.05);
+        if (z.grip <= 0) wzDetach('wiper', z);
+      }
+    }
+    if (w.t >= WIPE_T) S.wiper = null;
+  }
   if (!S.wz || !S.wz.length) return;
+  const kmh = S.v * 3.6;
   for (const z of S.wz) {
-    z.t += dt; z.ph += dt;
-    if (z.off) { z.x += z.vx * dt; z.y += z.vy * dt; z.vy += 500 * dt; z.rot += (z.vx > 0 ? 3 : -3) * dt; z.a = Math.max(0, z.a - dt * 1.4); }
+    z.t += dt; z.ph += dt; z.jolt = Math.max(0, z.jolt - dt * 4);
+    if (z.off) { z.x += z.vx * dt; z.y += z.vy * dt; z.vy += 500 * dt; z.rot += (z.vx > 0 ? 3 : -3) * dt; z.a = Math.max(0, z.a - dt * 1.4); continue; }
+    // le vent : d'autant plus fort qu'on va vite (≈ 4 s à 70 km/h)
+    if (S.phase === 'drive' && kmh > WZ_WIND && z.t > z.land) { z.grip -= dt * (kmh - WZ_WIND) / 25 * 0.25 / z.str; if (z.grip <= 0) wzDetach('wind', z); }
   }
   S.wz = S.wz.filter(z => !z.off || z.a > 0);
   if (S.phase !== 'drive') return;
   // virage pris assez vite : la force centrifuge en arrache un de temps en temps
   const b = bendHere();
-  if (b && S.v * 3.6 > 22 && wzOn().length) { S.wzBend = (S.wzBend || 0) + dt; if (S.wzBend > 1.1) { S.wzBend = 0; wzDetach('bend'); } } else S.wzBend = 0;
+  if (b && kmh > 22 && wzOn().length) { S.wzBend = (S.wzBend || 0) + dt; if (S.wzBend > 1.1) { S.wzBend = 0; wzDetach('bend'); } } else S.wzBend = 0;
 }
-// frein d'urgence (B) : un seul coup, au bon moment. Quand des zombies sont sur la vitre, une jauge apparaît :
-// une aiguille balaie d'un bout à l'autre, et il faut frapper B quand elle est dans la zone rouge.
-// Dans le rouge : freinage violent (la cabine plonge, étincelles, secousse), les zombies sont arrachés.
-// À côté : simple freinage d'urgence, ils restent accrochés. Dans les deux cas la rame s'arrête,
-// puis 2 s de réarmement : la tentative coûte cher, on ne la tente pas au hasard.
-const EB_SOFT = 3, EB_HARD = 9, EB_REARM = 2, EB_EJECT = 20;   // m/s² (raté / réussi), s, km/h minimum pour éjecter
-const EB_SWEEP = 0.6, EB_ZONE = 0.84;   // durée d'un balayage (s), début de la zone rouge (0 → 1)
-// position de l'aiguille : aller-retour régulier
-const ebNeedle = () => { const k = ((S.ebSw || 0) / EB_SWEEP) % 2; return k < 1 ? k : 2 - k; };
-const ebDec = () => S.eb && S.eb.hit ? EB_HARD : EB_SOFT;
+// les essuie-glaces : bras noir et balai en caoutchouc, pivot en bas à gauche du pare-brise
+function drawWiper() {
+  if (!FIRE() || S.mode !== 'running' || S.phase !== 'drive') return;
+  const k = wiperK(), px = WIPER_PX(), py = WIPER_PY(), L = W * 0.86, ang = wiperAng(k);   // couché → presque vertical
+  const tx = px + Math.cos(ang) * L, ty = py + Math.sin(ang) * L * WIPER_SY;
+  const mx = px + (tx - px) * 0.3, my = py + (ty - py) * 0.3;
+  g.save(); g.lineCap = 'round';
+  if (S.wiper) {   // traînée d'eau laissée par le balai
+    const kb = Math.max(0, k - 0.12), bx = px + Math.cos(wiperAng(kb)) * L, by = py + Math.sin(wiperAng(kb)) * L * WIPER_SY;
+    g.fillStyle = 'rgba(200,220,235,0.08)'; g.beginPath(); g.moveTo(mx, my); g.lineTo(tx, ty); g.lineTo(bx, by); g.closePath(); g.fill();
+  }
+  g.strokeStyle = '#08080a'; g.lineWidth = 4.5; g.beginPath(); g.moveTo(px, py); g.lineTo(mx, my); g.stroke();   // bras
+  g.strokeStyle = '#3a3c42'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(px, py - 1); g.lineTo(mx, my - 1); g.stroke();
+  g.strokeStyle = '#111114'; g.lineWidth = 3.4; g.beginPath(); g.moveTo(mx, my); g.lineTo(tx, ty); g.stroke();   // balai en caoutchouc
+  g.strokeStyle = 'rgba(210,215,225,0.45)'; g.lineWidth = 0.9; g.beginPath(); g.moveTo(mx, my - 1.2); g.lineTo(tx, ty - 1.2); g.stroke();   // armature métallique éclairée
+  g.fillStyle = '#18181c'; g.beginPath(); g.arc(px, py, 5, 0, 7); g.fill(); g.fillStyle = '#4a4c52'; g.beginPath(); g.arc(px - 1, py - 1, 1.6, 0, 7); g.fill();
+  g.restore();
+}
+// frein d'urgence (B) : freinage très puissant jusqu'à l'arrêt (la cabine plonge, étincelles, secousse),
+// puis 2 s de réarmement. En service normal, il bouscule les voyageurs.
+const EB_DEC = 9, EB_REARM = 2;
+const ebDec = () => EB_DEC;
 function emergencyBrake() {
   if (S.over || S.phase !== 'drive' || S.rev || S.backup || S.mg || S.blast) return;
   S.ebPressT = S.t;   // le coup de poing du pupitre s'enfonce
-  if (S.eb) return;   // un seul coup
+  if (S.eb) return;
   if (S.v < 0.5) { msg('Frein d\'urgence : la rame est déjà à l\'arrêt', '#ffb35e', 1.5); return; }
-  const on = wzOn(), needle = ebNeedle(), hit = !on.length || needle >= EB_ZONE;   // sans zombie, pas de jauge : freinage violent d'office
-  S.eb = { t: 0, hit, p: hit ? 1 : 0.25, ejected: false, sp: [], pit: 0, needle, zg: on.length > 0, judged: !on.length };
-  noise(0.9, hit ? 0.45 : 0.25, 'highpass', 2800, 2); noise(0.4, hit ? 0.4 : 0.2, 'lowpass', 260, 0.8); beep(70, 0.25, 'square', hit ? 0.18 : 0.1);
-  if (on.length && !hit) { msg('Raté ! Coup de frein trop mou : les zombies tiennent bon', '#ff6b5b', 2.5); sfxBad(); }
-  else if (!on.length) msg('🛑 FREIN D\'URGENCE', '#ffb35e', 1.5);
+  S.eb = { t: 0, p: 1, sp: [], pit: 0 };
+  noise(0.9, 0.45, 'highpass', 2800, 2); noise(0.4, 0.4, 'lowpass', 260, 0.8); beep(70, 0.25, 'square', 0.18);
+  msg('🛑 FREIN D\'URGENCE', '#ffb35e', 1.5);
   if (!FIRE()) pen(-30, `Freinage d'urgence à ${Math.round(S.v * 3.6)} km/h : voyageurs bousculés`);
 }
 function updateEmergencyBrake(dt) {
-  // l'aiguille ne tourne que lorsqu'il y a des zombies à arracher
-  if (!S.eb && FIRE() && S.phase === 'drive' && wzOn().length) S.ebSw = (S.ebSw || 0) + dt; else if (!S.eb) S.ebSw = 0;
   const e = S.eb; if (!e) return;
   e.t += dt;
   const moving = S.v > 0.5 && !e.stopT;
-  // plongée de la cabine : forte si le coup est réussi
-  const tgt = moving ? e.p * Math.min(1, S.v * 3.6 / 40) * 18 : 0;
+  const tgt = moving ? Math.min(1, S.v * 3.6 / 40) * 18 : 0;   // la cabine plonge vers l'avant
   e.pit += (tgt - e.pit) * Math.min(1, dt * 12);
-  // étincelles sous les roues
-  if (moving) for (let i = 0; i < 1 + Math.round(e.p * 6); i++) { const sd = Math.random() < 0.5 ? -1 : 1;
+  if (moving) for (let i = 0; i < 7; i++) { const sd = Math.random() < 0.5 ? -1 : 1;   // étincelles sous les roues
     e.sp.push({ x: W / 2 + sd * (W * 0.3 + Math.random() * 40), y: VIEW_H - 6, vx: sd * (60 + Math.random() * 160), vy: -40 - Math.random() * 170, t: 0 }); }
   for (const p of e.sp) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; }
   e.sp = e.sp.filter(p => p.t < 0.5);
-  if (moving) S.shake = Math.max(S.shake, 0.1 + e.p * Math.min(0.5, S.v / 40));
-  // coup réussi : au pic de la secousse (0,2 s), les zombies sont arrachés
-  if (!e.judged && e.hit && e.t >= 0.2) {
-    e.judged = true;
-    const on = wzOn();
-    if (on.length && S.v * 3.6 >= EB_EJECT) {
-      e.ejected = true;
-      if (!S.smears) S.smears = [];
-      for (const z of on) {   // projetés vers l'avant, dans le tunnel
-        z.off = true; z.vx = (z.x - W / 2) * 0.9 + (Math.random() - 0.5) * 90; z.vy = -300 - Math.random() * 140; z.rot = 0;
-        S.smears.push({ x: z.x, y: z.y - 20 * z.s, s: z.s, t: 0 });
-      }
-      S.score += 15 * on.length; S.shake = 0.8;
-      noise(0.3, 0.35, 'lowpass', 500, 0.8); beep(130, 0.15, 'sawtooth', 0.08);
-      msg(`💥 PILE DANS LE ROUGE ! ${on.length} zombie${on.length > 1 ? 's projetés' : ' projeté'} (+${15 * on.length})`, '#7dff8a', 2.5);
-    } else if (on.length) msg(`Trop lent pour les arracher : il faut rouler à ${EB_EJECT} km/h ou plus`, '#ff6b5b', 2.5);
-  }
-  if (S.v <= 0.05 && !e.stopT) { e.stopT = e.t; S.ebT = EB_REARM; e.bounce = e.pit; S.ebSw = 0; }
+  if (moving) S.shake = Math.max(S.shake, 0.1 + Math.min(0.5, S.v / 40));
+  if (S.v <= 0.05 && !e.stopT) { e.stopT = e.t; S.ebT = EB_REARM; e.bounce = e.pit; }
   if (e.stopT) { const k = e.t - e.stopT; e.pit = (e.bounce || 0) * Math.cos(k * 9) * Math.exp(-k * 5); }
   if (e.stopT && e.t - e.stopT > 0.6 && !e.sp.length) S.eb = null;
 }
 const ebPitch = () => S.eb ? S.eb.pit : 0;
 function drawEmergencyBrake() {
-  const e = S.eb;
-  if (e) {
-    g.save(); g.globalCompositeOperation = 'lighter';
-    for (const p of e.sp) { const a = 1 - p.t / 0.5; g.strokeStyle = `rgba(255,${190 + Math.random() * 60 | 0},90,${a})`; g.lineWidth = 2;
-      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025); g.stroke(); }
-    g.restore();
-    if (!e.stopT && Math.floor(e.t * 6) % 2 === 0) { g.fillStyle = `rgba(255,40,30,${0.04 + e.p * 0.1})`; g.fillRect(0, 0, W, VIEW_H); }   // voyant rouge
-  }
-  // jauge de timing : visible tant que des zombies sont sur la vitre (et juste après le coup, figée)
-  const show = e ? e.zg && e.t < 0.9 : FIRE() && S.phase === 'drive' && wzOn().length > 0;   // après le coup : l'aiguille reste figée un instant
-  if (!show) return;
-  const bw = 150, bx = W / 2 - bw / 2, by = 62, nd = e ? e.needle : ebNeedle(), inZone = nd >= EB_ZONE;
-  g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(bx - 6, by - 14, bw + 12, 28);
-  const title = e ? (e.hit ? 'PILE DANS LE ROUGE !' : 'RATÉ…') : 'FREIN D\'URGENCE : B DANS LE ROUGE !';
-  txt(title, W / 2, by - 3, 10, e ? (e.hit ? '#7dff8a' : '#ff6b5b') : '#ffd75e', 'center');
-  // fond : dégradé du jaune au rouge, zone rouge vive au bout
-  const gr = g.createLinearGradient(bx, 0, bx + bw, 0); gr.addColorStop(0, '#3a3216'); gr.addColorStop(EB_ZONE - 0.01, '#6a4a16'); gr.addColorStop(EB_ZONE, '#c8281c'); gr.addColorStop(1, '#ff3b2b');
-  g.fillStyle = gr; g.fillRect(bx, by, bw, 8);
-  if (!e && inZone) { g.fillStyle = 'rgba(255,90,70,0.35)'; g.fillRect(bx + bw * EB_ZONE - 2, by - 2, bw * (1 - EB_ZONE) + 4, 12); }   // la zone s'allume quand l'aiguille y est
-  g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 0.6; g.strokeRect(bx + bw * EB_ZONE, by, bw * (1 - EB_ZONE), 8);
-  // aiguille
-  const nx = bx + bw * nd;
-  g.fillStyle = '#ffffff'; g.fillRect(nx - 1, by - 3, 2, 14);
-  g.beginPath(); g.moveTo(nx - 3, by - 5); g.lineTo(nx + 3, by - 5); g.lineTo(nx, by - 1); g.fill();
+  const e = S.eb; if (!e) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (const p of e.sp) { const a = 1 - p.t / 0.5; g.strokeStyle = `rgba(255,${190 + Math.random() * 60 | 0},90,${a})`; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025); g.stroke(); }
+  g.restore();
+  if (!e.stopT && Math.floor(e.t * 6) % 2 === 0) { g.fillStyle = 'rgba(255,40,30,0.12)'; g.fillRect(0, 0, W, VIEW_H); }   // voyant rouge
 }
 // à l'arrivée en station : ceux qui sont encore agrippés se faufilent dans la rame
 function windZombiesBoard() {
@@ -568,7 +577,8 @@ function drawWindZombies() {
     const land = Math.min(1, z.t / z.land), sc = z.s * (0.4 + 0.6 * land), wob = Math.sin(z.ph * 3) * 2, slide = z.off ? 0 : Math.sin(z.ph * 0.7) * 3;
     const sk = z.skin, hasWound = R() < 0.7, woundX = (R() - 0.5) * 30, woundY = -22 + R() * 14, deadEye = R() < 0.35 ? (R() < 0.5 ? -1 : 1) : 0,
       bald = R() < 0.4, jawOpen = 0.6 + 0.4 * Math.sin(z.ph * 4), shirt = ['#2b2e33', '#3a2f28', '#2c3328', '#3b3b42'][Math.floor(R() * 4)];
-    g.save(); g.globalAlpha = z.a * Math.min(1, land * 1.5); g.translate(z.x + wob, z.y + slide); g.rotate(z.rot); g.scale(sc, sc);
+    const lose = z.off ? 0 : 1 - Math.max(0, z.grip ?? 1), shiver = lose > 0.6 ? Math.sin(z.ph * 40) * 2 * lose : 0;   // il glisse et tremble à mesure qu'il lâche
+    g.save(); g.globalAlpha = z.a * Math.min(1, land * 1.5); g.translate(z.x + wob + shiver + (z.jolt || 0) * 10, z.y + slide + lose * 26 - (z.jolt || 0) * 6); g.rotate(z.rot + (z.jolt || 0) * 0.15); g.scale(sc, sc);
     // buée de la respiration sur la vitre
     const br = 0.08 + 0.06 * Math.sin(z.ph * 2.2);
     let gr = g.createRadialGradient(0, 22, 2, 0, 22, 34); gr.addColorStop(0, `rgba(210,225,215,${br})`); gr.addColorStop(1, 'rgba(210,225,215,0)');

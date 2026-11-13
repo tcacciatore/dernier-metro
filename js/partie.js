@@ -226,7 +226,8 @@ function update(dt) {
   S.t += dt;
   S.msgs.forEach(m => m.t += dt); S.msgs = S.msgs.filter(m => m.t < m.life);
   if (S.mode === 'title') {
-    TITLE.t += dt; TITLE.sel += (LINE - TITLE.sel) * Math.min(1, dt * 12);
+    if (!TITLE.wait || TITLE.stage !== 0) TITLE.t += dt;
+    TITLE.sel += (LINE - TITLE.sel) * Math.min(1, dt * 12);
     const still = TITLE.stage === 0 && TITLE.t < INTRO_HIT;          // pendant l'arrivée de la rame, la caméra ne bouge pas
     S.pos = still ? S.pos : (S.pos + 9 * dt) % 1080; S.v = still ? 0 : 9;
     if (TITLE.stage === 1 && AC && !MUS) startMusic();
@@ -379,14 +380,14 @@ function update(dt) {
     } else {
       S.doors -= dt / 1.3;
       if (S.doors <= 0) {
-        const stayers = S.mp.filter(m => m.st === 'walk'), left = stayers.length, cst = STATIONS[S.cur];
+        const stayers = S.mp.filter(m => m.st === 'walk'), left = stayers.reduce((a, m) => a + need(m), 0), cst = STATIONS[S.cur];
         cst.people = stayers.map(m => Object.assign(mkPerson(cst.pos - m.z, Math.min(5.8, m.x + 1.8)), lookOf(m)));
         const res = STATIONS[S.cur].res; res.left = left;
         if (STATIONS[S.cur].name === busiestStation()) { if (left === 0) mDone('vide'); else mFail('vide'); }
         if (left > 0 && !FIRE()) S.score -= 5 * left;   // fuite : ceux qui restent sont comptés comme perdus, pas en points
         res.stars = Object.assign({ p: null, t: null }, res.stars || {}, { v: left === 0 });
         S.legPen = 0;
-        S.pops = [];
+        S.pops = []; S.msgs = [];   // les alertes de quai ne débordent pas sur la conduite
         if (S.next < STATIONS.length && !FIRE()) fillBilan();
         S.carShut = null;
         S.doors = 0; S.phase = 'drive'; S.mp = []; S.departT = S.t; sfxDoor(); startLeg();

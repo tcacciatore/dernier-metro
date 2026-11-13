@@ -286,7 +286,6 @@ function drawCab() {
   // arrêt d'urgence : « coup de poing » rouge sur platine jaune (touche B), il s'enfonce à chaque appui
   {
     const ex = 366, ey = cy - 2, e = S.eb, pressed = S.ebPressT !== undefined && S.t - S.ebPressT < 0.11;
-    const wzWait = FIRE() && S.phase === 'drive' && wzOn().length && !e;   // zombies sur la vitre : le bouton appelle
     // platine jaune biseautée, vissée
     g.fillStyle = '#0a0b0e'; g.fillRect(ex - 12.5, ey - 12.5, 25, 25);
     const pl = g.createLinearGradient(ex - 12, ey - 12, ex + 12, ey + 12); pl.addColorStop(0, '#e8c23a'); pl.addColorStop(1, '#8a6a12');
@@ -303,8 +302,7 @@ function drawCab() {
     g.fillStyle = mg2; g.beginPath(); g.arc(ex, ey + oy, r, 0, 7); g.fill();
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(ex - 2.2, ey + oy - 2.8, 2.4, 1.3, -0.5, 0, 7); g.fill();   // reflet
     sans('B', ex, ey + oy + 2, 5.5, 'rgba(255,230,220,0.85)', 'center', 0, true);
-    if (e && !e.stopT) glow(ex, ey, 12 + 10 * e.p, '255,40,30', 0.25 + 0.45 * e.p);   // freinage en cours : rougeoie selon la force
-    else if (wzWait && blink) { g.strokeStyle = '#9aff6a'; g.lineWidth = 1; g.beginPath(); g.arc(ex, ey, 11, 0, 7); g.stroke(); }
+    if (e && !e.stopT) glow(ex, ey, 22, '255,40,30', 0.7);   // freinage en cours : il rougeoie
     sans('URGENCE', ex, cy + 14.5, 4, e && !e.stopT ? '#ff6b5b' : '#8a909c', 'center', 0, !!(e && !e.stopT));
   }
 
@@ -731,6 +729,7 @@ function drawDoorAlarm() {
 function drawMsgs() {
   if (!S.msgs.length) return;
   const cctv = S.mode === 'running' && S.phase !== 'drive', drive = S.mode === 'running' && !cctv;
+  if (cctv) return;   // à quai : pas d'alerte par-dessus les caméras, l'essentiel passe par le bandeau du bas
   let left = 30, right = W - 30, y0 = cctv ? CAM_Y0 + CAM_H - 5 : 14, bottom = false;
   if (drive && S.phase === 'drive') {
     // en conduite : en bas de la vue, pour laisser libres le tunnel et les signaux
@@ -810,7 +809,7 @@ function drawHelp() {
       'Z : accélérer · S : freiner',
       'P : sonnerie · Entrée : fermer les portes',
       '← → : aiguillages · 1 à 5 : voitures',
-      ['#9aff6a', 'B dans le rouge : arrache les zombies'],
+      ['#9aff6a', 'Espace : essuie-glaces (zombies)'],
       'Caméra arrière : 3 s après chaque départ.',
       'Pastille VAGUE DE FEU : distance au feu.',
       'Échap : pause · ? : cette aide',
@@ -832,6 +831,7 @@ function drawHelp() {
       ['#ff2a2a', '■porte occupée : ne fermez pas !'],
       'Niveau dans la caisse : remplissage (40 places).',
       'Voiture pleine : la foule reste bloquée devant.',
+      ['#ffd75e', 'Groupe ×N : N places d\'un coup, sinon bloqué.'],
       'Touche 1 à 5 (sous chaque caméra) : fermer',
       'la voiture, la foule va à la porte voisine.',
     ]);
