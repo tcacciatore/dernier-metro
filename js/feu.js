@@ -418,30 +418,32 @@ function drawIncidentBars() {
 }
 // ---------- Mode feu : zombies agrippés au pare-brise (en traversant une station infestée) ----------
 // Ils masquent la vue. Chacun a une prise (1 → 0) : le vent l'use dès qu'on roule vite (au-dessus de 45 km/h),
+// un freinage appuyé aussi (inertie : la rame ralentit, eux continuent sur leur lancée),
 // chaque coup d'essuie-glace (Espace) en arrache un morceau, un virage pris vite en décroche un.
 // Ceux qui tiennent jusqu'à la station suivante se faufilent dans la rame et contaminent des voyageurs.
 const WZ_SKIN = ['#7f9a6a', '#6e8a5c', '#8aa276', '#748f63'];
-const WZ_WIND = 45, WZ_WIPE = 0.36;   // km/h à partir desquels le vent arrache, prise perdue par coup d'essuie-glace
+const WZ_WIND = 45, WZ_WIPE = 0.36, WZ_BRAKE = 0.3;   // + prise perdue par seconde de freinage franc   // km/h à partir desquels le vent arrache, prise perdue par coup d'essuie-glace
 function windZombiesJump(st, nForce) {
   const kmh = S.v * 3.6, n = nForce || (kmh >= 55 ? 1 : kmh >= 35 ? 2 : 3);
   if (!S.wz) S.wz = [];
   const slots = [0.24, 0.5, 0.76].sort(() => Math.random() - 0.5);
   for (let i = 0; i < n; i++) S.wz.push({ x: W * slots[i] + (Math.random() - 0.5) * 30, y: VIEW_H - 40 - Math.random() * 30, s: 0.85 + Math.random() * 0.35,
     skin: pick(WZ_SKIN), ph: Math.random() * 6, t: 0, off: false, vx: 0, vy: 0, rot: 0, a: 1, land: 0.25 + i * 0.18, grip: 1, str: 0.85 + Math.random() * 0.3, jolt: 0 });
-  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Foncez à plus de ${WZ_WIND} km/h et essuie-glaces (Espace)`, '#9aff6a', 3.5);
+  msg(`☣ ${n} zombie${n > 1 ? 's' : ''} sur le pare-brise ! Foncez, freinez fort ou essuie-glaces (Espace)`, '#9aff6a', 3.5);
   noise(0.3, 0.35, 'lowpass', 300, 0.8); beep(90, 0.2, 'triangle', 0.25);
 }
 const wzOn = () => (S.wz || []).filter(z => !z.off);
 function wzDetach(why, z) {
   z = z || wzOn()[0]; if (!z || z.off) return;
   z.off = true; z.rot = 0;
-  if (why === 'wind') { z.vx = (z.x < W / 2 ? -1 : 1) * (60 + Math.random() * 60); z.vy = -380 - Math.random() * 120; }   // emporté vers le haut, par-dessus le toit
+  if (why === 'brake') { z.vx = (z.x < W / 2 ? -1 : 1) * (40 + Math.random() * 50); z.vy = 160 + Math.random() * 80; }   // emporté par son élan, il glisse et tombe devant la rame
+  else if (why === 'wind') { z.vx = (z.x < W / 2 ? -1 : 1) * (60 + Math.random() * 60); z.vy = -380 - Math.random() * 120; }   // emporté vers le haut, par-dessus le toit
   else if (why === 'wiper') { z.vx = (S.wiper && S.wiper.dir < 0 ? -1 : 1) * (260 + Math.random() * 80); z.vy = -60; }   // balayé sur le côté
   else { z.vx = (z.x < W / 2 ? -1 : 1) * (120 + Math.random() * 80); z.vy = 20; }
   if (!S.smears) S.smears = [];
   S.smears.push({ x: z.x, y: z.y - 20 * z.s, s: z.s, t: 0 });
   S.score += 15; noise(0.25, 0.25, 'lowpass', 400, 0.8); beep(150, 0.12, 'sawtooth', 0.06);
-  msg(why === 'wind' ? 'Le vent a arraché un zombie (+15)' : why === 'wiper' ? 'Balayé par l\'essuie-glace ! (+15)' : 'Le virage a décroché un zombie (+15)', '#7dff8a', 1.8);
+  msg(why === 'brake' ? 'Emporté par son élan au freinage ! (+15)' : why === 'wind' ? 'Le vent a arraché un zombie (+15)' : why === 'wiper' ? 'Balayé par l\'essuie-glace ! (+15)' : 'Le virage a décroché un zombie (+15)', '#7dff8a', 1.8);
 }
 // essuie-glaces (Espace, mode feu) : un aller-retour de 0,5 s ; chaque zombie touché perd une partie de sa prise
 const WIPE_T = 0.5;
@@ -486,6 +488,8 @@ function updateWindZombies(dt) {
     if (z.off) { z.x += z.vx * dt; z.y += z.vy * dt; z.vy += 500 * dt; z.rot += (z.vx > 0 ? 3 : -3) * dt; z.a = Math.max(0, z.a - dt * 1.4); continue; }
     // le vent : d'autant plus fort qu'on va vite (≈ 4 s à 70 km/h)
     if (S.phase === 'drive' && kmh > WZ_WIND && z.t > z.land) { z.grip -= dt * (kmh - WZ_WIND) / 25 * 0.25 / z.str; if (z.grip <= 0) wzDetach('wind', z); }
+    // l'inertie : un freinage franc (S serré fort, au-dessus de 20 km/h) les fait glisser vers l'avant
+    else if (S.phase === 'drive' && keyBrake() && S.brakeF > 0.7 && kmh > 20 && z.t > z.land) { z.grip -= dt * WZ_BRAKE * S.brakeF / z.str; if (z.grip <= 0) wzDetach('brake', z); }
   }
   S.wz = S.wz.filter(z => !z.off || z.a > 0);
   if (S.phase !== 'drive') return;
